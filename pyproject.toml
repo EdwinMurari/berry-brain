@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "berry-brain"
-version = "0.1.0"
+version = "0.2.0"
 description = "Private project memory and evidence-based lesson reuse across AI clients"
 readme = "README.md"
 license = "MIT"
@@ -17,4 +17,4 @@ berry-brain = "brain_client:main"
 berry-brain-configure = "configure_client:cli"
 
 [tool.setuptools]
-py-modules = ["brain", "brain_client", "brain_local", "configure_client"]
+py-modules = ["brain", "brain_learning", "brain_client", "brain_local", "configure_client"]

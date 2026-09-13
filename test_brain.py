@@ -8,14 +8,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from brain import Brain, BrainError, RECALL_BYTES, encode
-from brain_learning import Gateway, GenerationError, Proposals, run_once, init
+from brain_learning import Proposals, run_once, init
 
 
 POLICY = {"clients": {
     "codex": {"projects": {"demo": {"write": True}}},
     "claude": {"projects": {"demo": {"write": True}}},
     "reader": {"projects": {"demo": {"write": False}}},
-    "berry-agents": {"room_local": True, "projects": {"demo": {"write": True, "rooms": ["!one"]}}},
+    "chat-client": {"room_local": True, "projects": {"demo": {"write": True, "rooms": ["!one"]}}},
 }}
 
 
@@ -102,12 +102,12 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(self.call("recall", actor="claude")["checkpoint"]["body"]["state"], "Replay done")
 
     def test_room_isolation_and_explicit_project_access(self):
-        event = self.episode(project="", room_id="!one", actor="berry-agents")
-        self.assertEqual(self.call("history", project="", room_id="!two", actor="berry-agents")["events"], [])
+        event = self.episode(project="", room_id="!one", actor="chat-client")
+        self.assertEqual(self.call("history", project="", room_id="!two", actor="chat-client")["events"], [])
         with self.assertRaises(BrainError):
             self.call("propose", source_ids=[event["id"]], lesson="leak", conditions="always")
         with self.assertRaises(BrainError):
-            self.call("history", room_id="!two", actor="berry-agents")
+            self.call("history", room_id="!two", actor="chat-client")
         with self.assertRaises(BrainError):
             self.call("history", actor="outsider")
         with self.assertRaises(BrainError):
@@ -277,7 +277,7 @@ class BrainTests(unittest.TestCase):
 
     def test_learning_generates_candidates_without_crossing_scope(self):
         event = self.episode()
-        self.episode(actor="berry-agents", project="", room_id="!one")
+        self.episode(actor="chat-client", project="", room_id="!one")
         class Generator:
             def generate(inner, rows):
                 self.assertEqual([r["id"] for r in rows], [event["id"]])
@@ -324,28 +324,6 @@ class BrainTests(unittest.TestCase):
             report = json.loads(db.execute("SELECT result FROM learning_jobs").fetchone()[0])
             self.assertEqual(report["provider"], {"response": "invalid source evidence"})
 
-    def test_gateway_checks_routed_identity_and_preserves_raw_output(self):
-        gateway = Gateway.__new__(Gateway)
-        gateway.model = "test-source/test-model"
-        gateway.base = "https://gateway.test/v1"
-        response = {"status": "completed", "source": "test-source", "model": "test-model",
-                    "requested_model": gateway.model, "usage": {"input_tokens": 10, "output_tokens": 5},
-                    "output": [{"type": "message", "content": [{"type": "output_text", "text": '{"lessons":[]}'}]}]}
-        def request(url, body=None):
-            if body is None:
-                return {"models": [{"source": "test-source", "model": "test-model", "capabilities": ["chat", "json_schema"]}]}
-            self.assertEqual(body["model"], gateway.model)
-            self.assertFalse(body["store"])
-            self.assertNotIn("tools", body)
-            return response
-        gateway.request = request
-        parsed, evidence = gateway.generate([])
-        self.assertEqual(parsed.lessons, [])
-        self.assertEqual(evidence["response"], response)
-        response["model"] = "different"
-        with self.assertRaises(GenerationError) as caught:
-            gateway.generate([])
-        self.assertEqual(caught.exception.evidence["response"], response)
 
     def test_replacement_retires_original_only_after_fresh_results(self):
         old = self.lesson()

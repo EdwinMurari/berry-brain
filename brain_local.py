@@ -51,8 +51,8 @@ def private_database(directory: Path) -> Path:
 
 class LocalClient:
     def __init__(self, directory: Path, identity: str, projects: list[str]):
-        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", identity) or identity == "berry-agents":
-            raise ValueError("use a local client name such as codex or claude; berry-agents is reserved for Matrix")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", identity):
+            raise ValueError("use a client name with lowercase letters, digits, dots, dashes or underscores")
         if not projects or any(not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,79}", p) for p in projects):
             raise ValueError("provide at least one project name using lowercase letters, digits, dots, dashes or underscores")
         self.identity = identity

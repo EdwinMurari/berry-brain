@@ -39,7 +39,7 @@ class Client:
     def request(self, path, data=None):
         request = urllib.request.Request(self.base + "/v1/brain/" + path,
             data=json.dumps(data).encode() if data is not None else None,
-            headers={"Authorization": "Bearer " + self.token, "X-Berry-App": self.identity,
+            headers={"Authorization": "Bearer " + self.token, "X-Brain-Client": self.identity,
                      "Content-Type": "application/json"})
         try:
             with self.http.open(request, timeout=25) as response:

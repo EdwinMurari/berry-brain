@@ -52,7 +52,7 @@ class LocalTests(unittest.TestCase):
         independent = LocalClient(self.root.parent / "other install", "codex", ["demo"])
         self.assertIsNone(independent.request("recall", args)["checkpoint"])
         with self.assertRaises(ValueError):
-            LocalClient(self.root, "berry-agents", ["demo"])
+            LocalClient(self.root, "invalid client", ["demo"])
         with self.assertRaises(ValueError):
             LocalClient(self.root, "codex", ["../private"])
 

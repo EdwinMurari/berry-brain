@@ -63,7 +63,7 @@ as a stdio MCP server. Add the same `--project` options as needed.
 
 An existing server user should keep their current `--config` registration. Local
 mode creates separate storage; it does not import or replace a server database.
-See [server mode](SERVER.md) for shared access across machines and Berry integration.
+The hosting application owns its authentication and deployment settings.
 
 ## How learning works
 
@@ -106,7 +106,9 @@ documents outside the checkpoint so saved state remains readable by clients.
 
 Local learning happens while a client uses the tools. It does not collect all
 conversations, read native client memories, or run while clients are closed.
-The existing server can also propose candidates through its model gateway.
+A hosting application can use `brain_learning.run_once` with its own generator
+to propose candidates. The package supplies the bounded learning rules; the host
+owns model calls and scheduling. No provider or homelab gateway is required.
 
 ## Skills
 
@@ -130,7 +132,8 @@ Default database locations:
 Use `--data-dir /absolute/private/directory` on both client registrations to choose
 another location. Keep it outside the source tree and on a local disk. Do not
 synchronize the live SQLite database through file-sync services or network shares.
-Use server mode when clients on different machines need one brain.
+For access from several machines, run the MCP process on one host through SSH,
+or use an application that hosts the brain API. Keep the database on that host.
 
 Local mode makes no network requests and has no telemetry. Recalled text goes to
 the connected AI client and can reach its model provider under that client's data
@@ -139,7 +142,7 @@ and account permissions. On Linux and macOS, the data directory must have mode
 `0700` and its database files mode `0600`. Windows uses the user's folder ACLs.
 
 Project scopes limit tool access; local mode trusts the OS account. Any process
-that can read the database can read its content. Use the authenticated server for
+that can read the database can read its content. Use an authenticated hosting application for
 clients that need separate credentials. Never save secrets, personal facts, raw
 transcripts, or hidden reasoning. The tool instructions prohibit these; there is
 no automatic filter that can guarantee their removal.
@@ -149,39 +152,31 @@ it only while clients are closed. Software updates do not delete it.
 
 ## Development and sharing
 
-The portable package contains four Python modules and requires Pydantic. It uses
-the same `brain.py` engine as the server. It excludes server dependencies, runtime
-settings, and saved memories. Run the local tests after installing:
+The package contains five Python modules and requires Pydantic. It has no HTTP
+framework, model SDK, database service, environment file, or deployment stack.
+
+Run the offline checks after installation:
 
 ```sh
-.venv/bin/python -m unittest -v test_brain_local test_configure_client
+.venv/bin/python -m unittest test_brain test_brain_local test_configure_client
 ```
 
-The Docker test stage also checks the HTTP API, server ownership, and background
-proposal rules. See [server checks](SERVER.md).
+Applications can import `Brain` from `brain`, supply a database path and an
+explicit client policy, and call the same engine used by local MCP clients.
+Client names have no special privileges. `room_local` policy enables room scopes
+and requires a matching project room grant. Hosts must authenticate callers and
+bind room IDs to trusted request context before passing them to the engine.
 
-`evaluate_brain.py` is a small model check using the server's existing Gateway
-configuration (`BERRY_LLM_BASE_URL`, `BERRY_LLM_API_KEY`, `BERRY_BRAIN_MODEL`).
-Run `python evaluate_brain.py` in that configured environment. It adds no service,
-model fallback, or client option. It uses a temporary brain and six fixed
-synthetic tasks, each with and without memory. The memory arm includes both a
-checkpoint and an explicit candidate trial. It checks resuming work, missing
-inputs, wrong conditions, stale state, conflicts, and malicious saved text.
-Tools read fixture facts or record a choice; they cannot act on real systems.
-The model never receives expected answers. A correct choice counts only after
-the required current facts have been read. Output includes exact requests,
-responses, source hashes, correctness, repeated mistakes, tool calls, elapsed
-time, and token use. This comparison does not isolate a candidate's effect, so
-it does not write lesson feedback. It also does not measure normal active-lesson
-retrieval. Those storage and retrieval contracts have separate code tests.
-Retain this output privately as test evidence. A failed model call ends the run
-with an incomplete result and a nonzero exit code.
+The HTTP client uses `Authorization: Bearer ...` and `X-Brain-Client` headers.
+Its config contains `url`, `identity`, and `token_file`. The host implements
+`GET /v1/brain/tools` and `POST /v1/brain/{action}` with the engine's contract.
+Hosting code, provider transport, credentials, and deployment settings belong to
+the consuming application. They are not part of this package.
 
-These are diagnostic cases, not proof of broad gains. Once used, they are
-regression cases. For release decisions, also use fresh representative project
-tasks with a fixed score, model and source snapshot. Keep those tasks separate
-from lesson creation. Compare failures as well as successes. Check the linked
-skill revision, and measure task quality separately from code-test counts.
+Code tests check storage and learning rules. They do not prove better model
+results. For that, compare fresh representative tasks with and without memory.
+Keep the model and scoring fixed. Measure failures, output quality, time, and
+cost. Do not use lesson-creation examples as fresh evidence of improvement.
 
 The code uses the [MIT license](LICENSE). Tests and examples use synthetic data.
 Do not include private `.env` files, credentials, databases, backups, or native

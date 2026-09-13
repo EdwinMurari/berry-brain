@@ -4,10 +4,9 @@ import hashlib
 import json
 import re
 import sqlite3
-import threading
 import time
 import uuid
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -137,7 +136,7 @@ class Revise(Body):
 MODELS = {"recall": Recall, "record": Record, "propose": Propose, "trial": Trial,
           "feedback": Feedback, "checkpoint": Checkpoint, "history": History, "revise": Revise}
 DESCRIPTIONS = {
-    "recall": "Recall task state and possible active lesson matches within 24 KB. Empty query returns task state only. Search matches are not applicability checks: check each lesson's conditions, current facts and linked skill revision before use. Task previews are marked; use history with record_id for full state before resuming or updating them. Returns receipt IDs for outcome feedback. Use a stable task ID across resumes. Omit project in Matrix for room-local state.",
+    "recall": "Recall task state and possible active lesson matches within 24 KB. Empty query returns task state only. Search matches are not applicability checks: check each lesson's conditions, current facts and linked skill revision before use. Task previews are marked; use history with record_id for full state before resuming or updating them. Returns receipt IDs for outcome feedback. Use a stable task ID across resumes. Omit project only when the client has room-local access.",
     "record": "Record one meaningful experience with exact source excerpts. event_id must stay unchanged on retries. Record failures too. Never save secrets, personal facts, raw transcripts or speculative claims as observed results.",
     "propose": "Propose a conditional lesson from recorded experiences in this scope. It remains a candidate until helpful results with distinct evidence on two fresh tasks, with no harmful feedback. Link a superseded lesson when correcting it. For a tested skill method, include its canonical name and full Git revision. Promotion does not publish or edit a skill; use the canonical catalogue's review and validation process.",
     "trial": "Read a candidate explicitly for a fresh-task experiment. Returns a receipt required for feedback. Candidate text is unverified; retain all current permissions and checks.",
@@ -228,10 +227,10 @@ class Brain:
             grant = client.get("projects", {}).get(body.project)
             if not grant or (write and not grant.get("write")):
                 raise BrainError(403, "project access denied")
-            if actor == "berry-agents" and body.room_id not in grant.get("rooms", []):
+            if client.get("room_local") and body.room_id not in grant.get("rooms", []):
                 raise BrainError(403, "project is not bound to this room")
             return "project:" + body.project
-        if actor != "berry-agents" or not client.get("room_local") or not body.room_id:
+        if not client.get("room_local") or not body.room_id:
             raise BrainError(403, "choose an allowed project")
         return "room:" + body.room_id
 
@@ -501,60 +500,3 @@ class Brain:
                 "updated": r["updated"], "attempts": r["attempts"], "proposal_ids": json.loads(r["result"]).get("proposal_ids", []),
                 "error_type": json.loads(r["result"]).get("error_type")} for r in jobs]
         return result
-
-
-def install(app, auth, path=Path("/data/brain.sqlite3"), policy_path=Path("/run/secrets/brain-policy.json"), *, start_worker=True):
-    from fastapi import Depends, HTTPException
-    from pydantic import ValidationError
-    from starlette.concurrency import run_in_threadpool
-
-    policy = json.loads(policy_path.read_text()) if policy_path.exists() else {"clients": {}}
-    brain = Brain(path, policy)
-    app.state.brain = brain
-
-    @app.get("/v1/brain/tools")
-    def schemas(actor: str = Depends(auth)):
-        try:
-            return brain.catalogue(actor)
-        except BrainError as exc:
-            raise HTTPException(exc.status, str(exc)) from exc
-
-    @app.post("/v1/brain/{action}")
-    async def call(action: str, data: dict, actor: str = Depends(auth)):
-        try:
-            return await run_in_threadpool(brain.call, action, actor, data)
-        except BrainError as exc:
-            raise HTTPException(exc.status, str(exc)) from exc
-        except ValidationError as exc:
-            raise HTTPException(422, "invalid brain arguments: " + "; ".join(
-                ".".join(map(str, e["loc"])) + ": " + e["msg"] for e in exc.errors())) from exc
-
-    # Model output is only a candidate. Activation uses recorded outcome policy.
-    stop = threading.Event()
-
-    def worker():
-        import logging
-        import os
-        from brain_learning import Gateway, run_once
-        while not stop.wait(300):
-            try:
-                if os.getenv("BERRY_BRAIN_MODEL"):
-                    result = run_once(brain, Gateway(os.environ["BERRY_BRAIN_MODEL"]))
-                    if result and result["state"] == "failed":
-                        logging.warning("brain proposal job %s failed: %s", result["id"], result["error_type"])
-            except Exception:
-                logging.exception("brain proposal generation failed")
-
-    previous_lifespan = app.router.lifespan_context
-
-    @asynccontextmanager
-    async def lifespan(application):
-        async with previous_lifespan(application) as state:
-            if start_worker:
-                threading.Thread(target=worker, name="brain-consolidation", daemon=True).start()
-            try:
-                yield state
-            finally:
-                stop.set()
-
-    app.router.lifespan_context = lifespan
