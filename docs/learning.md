@@ -2,14 +2,18 @@
 
 [Home](../README.md) · [Setup and data](usage.md) · [Development](development.md)
 
-The MCP instructions and tool descriptions provide the learning rules:
+The tool descriptions define when and how to use memory. Recall when saved task
+state or past experience could affect the next decision. Reuse sufficient context
+already loaded. A new message alone does not require another recall. Search with
+a focused query when a relevant lesson could help, and check live status with
+the owning tool or service. Recall again if relevant shared state may have changed.
 
-1. Recall task state and relevant lessons before substantial work.
-2. Save meaningful outcomes with exact evidence. Include failures and uncertainty.
-3. Propose a conditional lesson from those records.
-4. Test candidates explicitly on later tasks. Report the observed comparison.
-5. Save a compact checkpoint so another client can resume with the same project
-   and task ID. Recheck old job status and other facts that can change.
+Save meaningful outcomes with exact evidence, including failures and uncertainty.
+Propose conditional lessons from those records and test them on later tasks.
+Save a compact checkpoint for meaningful changes needed to resume or hand off
+work, not unchanged waits. Keep the goal, essential constraints, latest checked
+state and next step concise. Link detailed evidence instead of repeating it.
+Reuse the same project and task ID across clients.
 
 Candidates stay out of normal recall until two later tasks report helpful results
 with distinct evidence. Use `history` to find a candidate for a relevant fresh
