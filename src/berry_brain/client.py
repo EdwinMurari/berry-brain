@@ -2,6 +2,7 @@
 """Stdio MCP adapter for the shared engine, through a server or local storage."""
 
 import argparse
+from importlib.metadata import version as package_version
 import json
 import os
 import stat
@@ -15,6 +16,12 @@ from pathlib import Path
 MAX_BYTES = 512 * 1024
 
 
+class ProtocolError(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -22,18 +29,25 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class Client:
     def __init__(self, config):
+        if not isinstance(config, dict) or any(not isinstance(config.get(key), str) or not config[key]
+                                               for key in ("url", "identity", "token_file")):
+            raise ValueError("brain config requires URL, identity and token file strings")
         self.base = config["url"].rstrip("/")
         parsed = urllib.parse.urlsplit(self.base)
         if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"}):
             raise ValueError("brain URL must use HTTPS or loopback HTTP")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("invalid brain URL")
         self.identity = config["identity"]
+        if not all(33 <= ord(char) <= 126 for char in self.identity):
+            raise ValueError("brain identity must contain printable ASCII without spaces")
         token_file = Path(config["token_file"]).expanduser()
         mode = token_file.lstat()
         if not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077):
             raise ValueError("brain token must be a private regular file")
         self.token = token_file.read_text().strip()
+        if not self.token or not all(33 <= ord(char) <= 126 for char in self.token):
+            raise ValueError("brain token must contain printable ASCII without spaces")
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def request(self, path, data=None):
@@ -48,41 +62,43 @@ class Client:
                     raise RuntimeError("brain result exceeded limit")
                 return json.loads(raw)
         except urllib.error.HTTPError as exc:
-            # Never echo credentials or unbounded response bodies.
-            detail = exc.read(4096).decode(errors="replace")
-            raise RuntimeError(f"brain HTTP {exc.code}: {detail}") from None
+            # An error body can reflect credentials sent in the request.
+            exc.close()
+            raise RuntimeError(f"brain HTTP {exc.code}: request failed") from None
         except (TimeoutError, urllib.error.URLError) as exc:
             raise RuntimeError("brain unavailable; mutation status may be unknown. Retry identical arguments.") from exc
 
 
 def dispatch(client, message):
     method = message.get("method")
+    params = message.get("params", {})
+    if not isinstance(params, dict):
+        raise ProtocolError(-32602, "parameters must be an object")
     if method == "initialize":
-        version = message.get("params", {}).get("protocolVersion")
+        version = params.get("protocolVersion")
+        if version is not None and not isinstance(version, str):
+            raise ProtocolError(-32602, "protocol version must be a string")
         return {"protocolVersion": version if version in {"2024-11-05", "2025-03-26", "2025-06-18"} else "2025-06-18",
-                "capabilities": {"tools": {}}, "serverInfo": {"name": "berry-brain", "version": "1.0.0"},
+                "capabilities": {"tools": {}}, "serverInfo": {"name": "berry-brain", "version": package_version("berry-brain")},
                 "instructions": client.request("tools")["instructions"]}
     if method == "ping":
         return {}
     if method == "tools/list":
         return {"tools": client.request("tools")["tools"]}
     if method == "tools/call":
-        params = message.get("params", {})
-        if not isinstance(params, dict):
-            raise ValueError("tool parameters must be an object")
         name = params.get("name", "")
         arguments = params.get("arguments", {})
         if not isinstance(arguments, dict):
-            raise ValueError("tool arguments must be an object")
+            raise ProtocolError(-32602, "tool arguments must be an object")
         if not isinstance(name, str) or not name.startswith("brain_") or not name[6:].isascii() or not name[6:].isalpha():
-            raise ValueError("unknown brain tool")
+            raise ProtocolError(-32602, "unknown brain tool")
         try:
             # The shared engine validates action names and current access rights.
             result = client.request(name.removeprefix("brain_"), arguments)
             return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, separators=(",", ":"))}], "isError": False}
         except RuntimeError as exc:
             return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
-    raise ValueError("method not found")
+    raise ProtocolError(-32601, "method not found")
 
 
 def main():
@@ -97,7 +113,7 @@ def main():
     parser.add_argument("--call", choices=["tools", "recall", "record", "propose", "trial", "feedback", "checkpoint", "history", "revise"])
     args = parser.parse_args()
     if args.local:
-        from brain_local import LocalClient, default_directory
+        from .local import LocalClient, default_directory
         client = LocalClient(args.data_dir or default_directory(), args.identity, args.project or ["default"])
     else:
         if args.data_dir or args.project or args.identity != "local":
@@ -110,23 +126,32 @@ def main():
         line = sys.stdin.buffer.readline(MAX_BYTES + 1)
         if not line:
             break
-        message = None
+        request_id = None
         try:
             if len(line) > MAX_BYTES:
                 # Discard the rest of this frame. Its tail is not a new request.
                 while line and not line.endswith(b"\n"):
                     line = sys.stdin.buffer.readline(MAX_BYTES + 1)
-                raise ValueError("request exceeded limit")
+                raise ProtocolError(-32600, "request exceeded limit")
             message = json.loads(line)
-            if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
-                raise ValueError("invalid request")
+            if (not isinstance(message, dict) or message.get("jsonrpc") != "2.0"
+                    or not isinstance(message.get("method"), str)
+                    or ("id" in message and type(message["id"]) not in (str, int))):
+                raise ProtocolError(-32600, "invalid request")
             if "id" not in message:
                 continue
+            request_id = message["id"]
             result = dispatch(client, message)
             reply = {"jsonrpc": "2.0", "id": message["id"], "result": result}
         except Exception as exc:
-            reply = {"jsonrpc": "2.0", "id": message.get("id") if isinstance(message, dict) else None,
-                     "error": {"code": -32603, "message": str(exc)}}
+            if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError)):
+                code, detail = -32700, "parse error"
+            elif isinstance(exc, ProtocolError):
+                code, detail = exc.code, str(exc)
+            else:
+                code, detail = -32603, "internal error"
+            reply = {"jsonrpc": "2.0", "id": request_id,
+                     "error": {"code": code, "message": detail}}
         print(json.dumps(reply, ensure_ascii=False), flush=True)
 
 

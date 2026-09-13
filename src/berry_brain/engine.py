@@ -201,11 +201,12 @@ class Brain:
                     hash TEXT NOT NULL, response TEXT NOT NULL, PRIMARY KEY(scope,actor,event_id));
                 CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(id UNINDEXED, scope UNINDEXED, text);
             """)
+            # Serialize schema checks with upgrades from other client processes.
+            db.execute("BEGIN IMMEDIATE")
             if "response" not in {r[1] for r in db.execute("PRAGMA table_info(feedback)")}:
                 db.execute("ALTER TABLE feedback ADD COLUMN response TEXT NOT NULL DEFAULT '{}'")
             # Recheck existing promotions once when upgrading the evidence rule.
             # Normal operation updates only the lesson receiving feedback.
-            db.execute("BEGIN IMMEDIATE")
             if db.execute("PRAGMA user_version").fetchone()[0] < 1:
                 for row in db.execute("SELECT * FROM records WHERE kind='lesson' AND state='active'").fetchall():
                     self.consolidate_one(db, row)

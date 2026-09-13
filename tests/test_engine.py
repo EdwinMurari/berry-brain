@@ -3,12 +3,13 @@
 import tempfile
 import unittest
 import json
+from threading import Barrier
 from pydantic import ValidationError
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from brain import Brain, BrainError, RECALL_BYTES, encode
-from brain_learning import Proposals, run_once, init
+from berry_brain.engine import Brain, BrainError, RECALL_BYTES, encode
+from berry_brain.learning import Proposals, run_once, init
 
 
 POLICY = {"clients": {
@@ -28,6 +29,27 @@ class BrainTests(unittest.TestCase):
 
     def call(self, operation, actor="codex", **data):
         return self.brain.call(operation, actor, {"project": "demo", "task_id": "origin", **data})
+
+    def test_concurrent_upgrade_preserves_existing_records(self):
+        saved = self.episode()
+        init(self.brain)
+        with self.brain.db() as db:
+            db.execute("ALTER TABLE feedback DROP COLUMN response")
+            db.execute("ALTER TABLE learning_jobs DROP COLUMN attempts")
+        start = Barrier(8)
+
+        def reopen(_):
+            start.wait(timeout=10)
+            brain = Brain(self.path, POLICY)
+            init(brain)
+            with brain.db() as db:
+                self.assertEqual(db.execute("SELECT body FROM records WHERE id=?", (saved["id"],)).fetchone()[0],
+                                 encode(saved["body"]))
+                self.assertIn("response", {row[1] for row in db.execute("PRAGMA table_info(feedback)")})
+                self.assertIn("attempts", {row[1] for row in db.execute("PRAGMA table_info(learning_jobs)")})
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(reopen, range(8)))
 
     def evidence(self, excerpt="test output: passed", reference="artifact:run-1"):
         return [{"reference": reference, "excerpt": excerpt, "source": "tool"}]

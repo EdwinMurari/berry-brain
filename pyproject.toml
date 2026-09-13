@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "berry-brain"
-version = "0.2.0"
+version = "0.3.0"
 description = "Private project memory and evidence-based lesson reuse across AI clients"
 readme = "README.md"
 license = "MIT"
@@ -13,8 +13,13 @@ requires-python = ">=3.11"
 dependencies = ["pydantic==2.13.5"]
 
 [project.scripts]
-berry-brain = "brain_client:main"
-berry-brain-configure = "configure_client:cli"
+berry-brain = "berry_brain.client:main"
+berry-brain-configure = "berry_brain.configure:cli"
 
-[tool.setuptools]
-py-modules = ["brain", "brain_learning", "brain_client", "brain_local", "configure_client"]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["berry_brain*"]
+
+[project.urls]
+Repository = "https://github.com/EdwinMurari/berry-brain"
+Issues = "https://github.com/EdwinMurari/berry-brain/issues"

@@ -4,7 +4,7 @@ import json
 import time
 
 from pydantic import BaseModel, ConfigDict, Field
-from brain import Propose, encode, digest
+from .engine import Propose, encode, digest
 
 
 class Proposal(BaseModel):
@@ -29,6 +29,7 @@ def init(brain):
             CREATE TABLE IF NOT EXISTS learning_sources (
                 record_id TEXT PRIMARY KEY, job_id TEXT NOT NULL);
         """)
+        db.execute("BEGIN IMMEDIATE")
         if "attempts" not in {r[1] for r in db.execute("PRAGMA table_info(learning_jobs)")}:
             db.execute("ALTER TABLE learning_jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1")
 

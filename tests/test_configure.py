@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import configure_client as setup
+from berry_brain import configure as setup
 
 
 class InstructionTests(unittest.TestCase):
@@ -96,7 +96,7 @@ class InstructionTests(unittest.TestCase):
 
     def test_empty_config_variables_use_home_defaults(self):
         with patch.dict(os.environ, {"CODEX_HOME": "", "CLAUDE_CONFIG_DIR": ""}), \
-                patch("configure_client.Path.home", return_value=self.root):
+                patch("berry_brain.configure.Path.home", return_value=self.root):
             self.assertEqual(setup.global_instructions("codex"), self.root / ".codex/AGENTS.md")
             self.assertEqual(setup.global_instructions("claude"), self.root / ".claude/CLAUDE.md")
 
@@ -117,15 +117,15 @@ class InstructionTests(unittest.TestCase):
     def test_broken_instructions_fail_before_registration(self):
         self.path.write_text(setup.BEGIN)
         with patch.object(sys, "argv", ["configure_client.py", "codex", "--config", "client.json"]), \
-                patch("configure_client.global_instructions", return_value=self.path), \
-                patch("configure_client.subprocess.run") as run:
+                patch("berry_brain.configure.global_instructions", return_value=self.path), \
+                patch("berry_brain.configure.subprocess.run") as run:
             with self.assertRaises(ValueError):
                 setup.main()
             run.assert_not_called()
 
     def test_failed_atomic_replace_preserves_original(self):
         self.path.write_text("My rules.\n")
-        with patch("configure_client.os.replace", side_effect=OSError("write failed")):
+        with patch("berry_brain.configure.os.replace", side_effect=OSError("write failed")):
             with self.assertRaises(OSError):
                 setup.install_instructions(self.path)
         self.assertEqual(self.path.read_text(), "My rules.\n")
@@ -135,16 +135,16 @@ class InstructionTests(unittest.TestCase):
         args = ["configure_client.py", "codex", "--config", str(self.root / "client.json")]
         for failure_at in (0, 1):
             with self.subTest(failure_at=failure_at), patch.object(sys, "argv", args), \
-                    patch("configure_client.subprocess.run") as run, \
-                    patch("configure_client.global_instructions", return_value=self.path):
+                    patch("berry_brain.configure.subprocess.run") as run, \
+                    patch("berry_brain.configure.global_instructions", return_value=self.path):
                 ok = subprocess.CompletedProcess([], 0, stdout=json.dumps({"tools": [{}]}))
                 run.side_effect = [ok] * failure_at + [subprocess.CalledProcessError(1, "probe or register")]
                 with self.assertRaises(subprocess.CalledProcessError):
                     setup.main()
                 self.assertFalse(self.path.exists())
         with patch.object(sys, "argv", args), \
-                patch("configure_client.subprocess.run") as run, \
-                patch("configure_client.global_instructions", return_value=self.path):
+                patch("berry_brain.configure.subprocess.run") as run, \
+                patch("berry_brain.configure.global_instructions", return_value=self.path):
             run.return_value.stdout = json.dumps({"tools": [{}]})
             setup.main()
             setup.main()

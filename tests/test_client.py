@@ -1,6 +1,9 @@
 """Local installation, real MCP processes, privacy, and shared-engine regressions."""
 
 import json
+import io
+import importlib.metadata
+import urllib.error
 import os
 import shlex
 import subprocess
@@ -12,9 +15,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from brain_client import Client, MAX_BYTES, dispatch
-from brain_local import LocalClient, default_directory, private_database
-import configure_client
+from berry_brain.client import Client, MAX_BYTES, dispatch
+from berry_brain.local import LocalClient, default_directory, private_database
+from berry_brain import configure as configure_client
 
 
 class LocalTests(unittest.TestCase):
@@ -73,7 +76,7 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(len(dispatch(client, {"method": "tools/list"})["tools"]), 8)
 
     def process(self, identity, messages):
-        command = [sys.executable, str(Path(__file__).with_name("brain_client.py")),
+        command = [sys.executable, "-I", "-m", "berry_brain.client",
                    "--local", "--data-dir", str(self.root), "--identity", identity, "--project", "demo"]
         result = subprocess.run(command, input="".join(json.dumps(m) + "\n" for m in messages),
                                 capture_output=True, text=True, check=True, timeout=30)
@@ -102,7 +105,7 @@ class LocalTests(unittest.TestCase):
         mutation = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                     "params": {"name": "brain_checkpoint", "arguments": args}}
         payload = " " * (MAX_BYTES + 1) + json.dumps(mutation) + '\n{"jsonrpc":"2.0","id":2,"method":"ping"}\n'
-        command = [sys.executable, str(Path(__file__).with_name("brain_client.py")),
+        command = [sys.executable, "-I", "-m", "berry_brain.client",
                    "--local", "--data-dir", str(self.root), "--project", "demo"]
         result = subprocess.run(command, input=payload, capture_output=True, text=True, check=True, timeout=30)
         replies = [json.loads(line) for line in result.stdout.splitlines()]
@@ -114,18 +117,71 @@ class LocalTests(unittest.TestCase):
     def test_mcp_output_is_utf8_even_with_ascii_process_encoding(self):
         args = {"project": "demo", "task_id": "unicode", "expected_version": 0,
                 "goal": "Check café labels ☕", "state": "Checked", "status": "active"}
-        command = [sys.executable, str(Path(__file__).with_name("brain_client.py")),
+        command = [sys.executable, "-I", "-m", "berry_brain.client",
                    "--local", "--data-dir", str(self.root), "--project", "demo", "--call", "checkpoint"]
         result = subprocess.run(command, input=json.dumps(args).encode(), capture_output=True, check=True,
                                 env={**os.environ, "PYTHONIOENCODING": "ascii"}, timeout=30)
         self.assertEqual(json.loads(result.stdout)["body"]["goal"], args["goal"])
+
+    def test_mcp_reports_installed_version(self):
+        result = self.process("codex", [{"jsonrpc": "2.0", "id": 1, "method": "initialize"}])[0]
+        self.assertEqual(result["result"]["serverInfo"]["version"], importlib.metadata.version("berry-brain"))
+
+    def test_invalid_requests_do_not_save_and_stream_recovers(self):
+        args = {"project": "demo", "task_id": "invalid-id", "expected_version": 0,
+                "goal": "Must not save", "state": "Rejected", "status": "active"}
+        messages = [
+            {"jsonrpc": "2.0", "id": None, "method": "tools/call", "params": {"name": "brain_checkpoint", "arguments": args}},
+            {"jsonrpc": "2.0", "id": True, "method": "tools/call", "params": {"name": "brain_checkpoint", "arguments": args}},
+            {"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": None},
+            {"jsonrpc": "2.0", "id": 4, "method": "missing-method"},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 5, "method": "ping"},
+        ]
+        replies = self.process("codex", messages)
+        self.assertEqual([r["error"]["code"] for r in replies[:-1]], [-32600, -32600, -32602, -32601])
+        self.assertIsNone(replies[0]["id"])
+        self.assertEqual(replies[-1]["result"], {})
+        self.assertIsNone(self.client().request("recall", {"project": "demo", "task_id": "invalid-id"})["checkpoint"])
+
+    def test_parse_error_does_not_stop_next_request(self):
+        command = [sys.executable, "-I", "-m", "berry_brain.client", "--local", "--data-dir", str(self.root)]
+        result = subprocess.run(command, input='not json\n{"jsonrpc":"2.0","id":1,"method":"ping"}\n',
+                                capture_output=True, text=True, check=True, timeout=30)
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(replies[0]["error"]["code"], -32700)
+        self.assertEqual(replies[1]["result"], {})
+
+    def test_http_errors_do_not_return_reflected_credentials(self):
+        token = self.root.parent / "test.token"
+        token.write_text("private-example-token")
+        token.chmod(0o600)
+        client = Client({"url": "https://brain.example.org", "identity": "test", "token_file": str(token)})
+        error = urllib.error.HTTPError(client.base, 403, "reflected credential", {}, io.BytesIO(b"private-example-token"))
+        with patch.object(client.http, "open", side_effect=error), self.assertRaises(RuntimeError) as caught:
+            client.request("tools")
+        self.assertNotIn(client.token, str(caught.exception))
+        self.assertIn("403", str(caught.exception))
+
+    def test_http_config_rejects_bad_headers_without_echoing_token(self):
+        token = self.root.parent / "test.token"
+        token.write_text("private-token\ninjected-header")
+        token.chmod(0o600)
+        config = {"url": "https://brain.example.org", "identity": "test", "token_file": str(token)}
+        with self.assertRaises(ValueError) as caught:
+            Client(config)
+        self.assertNotIn("private-token", str(caught.exception))
+        token.write_text("valid-example-token")
+        for url in ("https:///missing-host", "https://user:password@example.org", "http://example.org"):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                Client({**config, "url": url})
 
     def test_windows_http_token_uses_account_permissions(self):
         token = self.root.parent / "test.token"
         token.write_text("test-token")
         token.chmod(0o644)
         config = {"url": "http://localhost:1234", "identity": "test", "token_file": str(token)}
-        with patch("brain_client.os", SimpleNamespace(name="nt")):
+        with patch("berry_brain.client.os", SimpleNamespace(name="nt")):
             self.assertEqual(Client(config).token, "test-token")
         if os.name != "nt":
             with self.assertRaises(ValueError):
@@ -164,22 +220,22 @@ class LocalTests(unittest.TestCase):
             private_database(self.root)
 
     def test_platform_data_paths(self):
-        with patch("brain_local.sys.platform", "darwin"):
+        with patch("berry_brain.local.sys.platform", "darwin"):
             self.assertEqual(default_directory(), Path.home() / "Library/Application Support/berry-brain")
-        with patch("brain_local.sys.platform", "win32"), patch.dict(os.environ, {"LOCALAPPDATA": str(self.root)}):
+        with patch("berry_brain.local.sys.platform", "win32"), patch.dict(os.environ, {"LOCALAPPDATA": str(self.root)}):
             self.assertEqual(default_directory(), self.root / "berry-brain")
-        with patch("brain_local.sys.platform", "win32"), patch.dict(os.environ, {"LOCALAPPDATA": ""}):
+        with patch("berry_brain.local.sys.platform", "win32"), patch.dict(os.environ, {"LOCALAPPDATA": ""}):
             self.assertEqual(default_directory(), Path.home() / "AppData/Local/berry-brain")
-        with patch("brain_local.sys.platform", "linux"), patch.dict(os.environ, {"XDG_DATA_HOME": str(self.root)}):
+        with patch("berry_brain.local.sys.platform", "linux"), patch.dict(os.environ, {"XDG_DATA_HOME": str(self.root)}):
             self.assertEqual(default_directory(), self.root / "berry-brain")
 
     def test_registration_uses_persistent_absolute_paths(self):
         for client in ("codex", "claude"):
             with self.subTest(client=client), patch.object(sys, "argv", ["configure_client.py", client,
                     "--local", "--data-dir", str(self.root), "--project", "demo"]), \
-                    patch("configure_client.subprocess.run") as run, \
+                    patch("berry_brain.configure.subprocess.run") as run, \
                     patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.root.parent / "claude-config")}), \
-                    patch("configure_client.global_instructions", return_value=self.root.parent / (client + ".md")):
+                    patch("berry_brain.configure.global_instructions", return_value=self.root.parent / (client + ".md")):
                 run.return_value.stdout = json.dumps({"tools": [{"name": "brain_recall"}]})
                 configure_client.main()
                 probe = run.call_args_list[0].args[0]

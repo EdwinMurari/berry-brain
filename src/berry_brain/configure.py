@@ -116,14 +116,12 @@ def register_client(client: str, adapter: list[str]) -> None:
 def command(config, host=None, remote_adapter=None):
     if host and (not remote_adapter or not remote_adapter.startswith("/")):
         raise ValueError("--ssh-host requires --remote-adapter with its absolute path on that host")
-    adapter = ["python3" if host else sys.executable,
-               remote_adapter if host else str(Path(__file__).with_name("brain_client.py")),
-               "--config", config]
     if host:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9@._-]*", host):
             raise ValueError("invalid SSH host")
+        adapter = ["python3", remote_adapter, "--config", config]
         return ["ssh", "-T", "-o", "BatchMode=yes", "--", host, shlex.join(adapter)]
-    return adapter
+    return [sys.executable, "-I", "-m", "berry_brain.client", "--config", config]
 
 
 def main():
@@ -143,9 +141,9 @@ def main():
     if args.local:
         if args.ssh_host or args.remote_adapter:
             parser.error("SSH options require --config")
-        from brain_local import default_directory
+        from .local import default_directory
         directory = (args.data_dir or default_directory()).expanduser().absolute()
-        adapter = [sys.executable, str(Path(__file__).with_name("brain_client.py")),
+        adapter = [sys.executable, "-I", "-m", "berry_brain.client",
                    "--local", "--identity", args.client, "--data-dir", str(directory)]
         for project in args.project or ["default"]:
             adapter += ["--project", project]

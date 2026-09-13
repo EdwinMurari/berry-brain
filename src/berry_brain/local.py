@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from brain import Brain, BrainError
+from .engine import Brain, BrainError
 
 
 def default_directory() -> Path:

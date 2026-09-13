@@ -8,5 +8,5 @@ client, and client setup. Keep one implementation of each learning rule.
 - Client names do not grant special access. Permissions come from explicit policy.
 - Preserve stored data and the evidence rules when changing package versions.
 - Use synthetic data. Never commit credentials, databases, or private client state.
-- Run `python -m unittest test_brain test_brain_local test_configure_client`
+- Run `python -m unittest discover -s tests`
   in an environment with the package installed.
