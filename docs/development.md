@@ -1,82 +1,124 @@
-# Development and integration
+# Development
 
 [Home](../README.md) · [Setup and data](usage.md) · [Learning](learning.md)
 
-## Source map
+## Source files
 
-| File | Purpose |
+The package has one brain engine. Local clients and host applications use it.
+
+| Path | Purpose |
 | --- | --- |
-| [`engine.py`](../src/berry_brain/engine.py) | Records, recall, access checks and lesson evidence rules |
-| [`learning.py`](../src/berry_brain/learning.py) | Bounded candidate generation with a host-supplied generator |
-| [`local.py`](../src/berry_brain/local.py) | Local database paths, permissions and client policy |
-| [`client.py`](../src/berry_brain/client.py) | Stdio MCP and HTTP client transport |
-| [`configure.py`](../src/berry_brain/configure.py) | Client registration and the shared reminder text |
-| [`tests/`](../tests/) | Offline tests with synthetic data |
+| [engine.py](../src/berry_brain/engine.py) | Records, recall, access checks, and lesson rules |
+| [learning.py](../src/berry_brain/learning.py) | Candidate generation within set limits |
+| [local.py](../src/berry_brain/local.py) | Local paths, file permissions, and client access |
+| [client.py](../src/berry_brain/client.py) | MCP messages and HTTP requests |
+| [configure.py](../src/berry_brain/configure.py) | Client setup and shared reminder text |
+| [tests/](../tests/) | Offline tests with synthetic data |
+| [docs/](./) | Setup, learning, and development guides |
+| [.github/](../.github/) | Automated test workflow |
+| [pyproject.toml](../pyproject.toml) | Package details, dependencies, and commands |
 
-## Checks
+The package requires Pydantic. It has no HTTP framework, model SDK, database
+service, environment file, or deployment stack.
 
-The package has five focused modules and requires Pydantic. It has no HTTP
-framework, model SDK, database service, environment file, or deployment stack.
+## Run checks
 
-Run the offline checks after installation:
+Install the package before testing. Its source is under `src/`.
+Tests use the installed code and start real MCP processes.
+
+From the source directory:
 
 ```sh
+.venv/bin/python -m pip install .
 .venv/bin/python -m unittest discover -s tests
 ```
 
-Build distributable files with the standard Python build tool:
+See [Setup](usage.md#install) to create the environment or use Windows commands.
+
+The tests run offline with synthetic data. They need no model credentials or
+private services. GitHub Actions runs them on Linux, macOS, and Windows.
+It also checks Python 3.11, the minimum supported version.
+
+## Build a release
+
+Use the Python build tool:
 
 ```sh
 .venv/bin/python -m pip install build
 .venv/bin/python -m build
 ```
 
-The source uses a `src/` layout. Install the package before running tests.
-This makes checks use installed code, including real MCP subprocesses.
-GitHub Actions runs the offline suite on Linux, macOS and Windows.
-It also checks the minimum supported Python version, 3.11.
-No model credentials or private services are used in these checks.
+## Connect a host application
 
-## Host integration
+Import `Brain` from `berry_brain.engine`. Supply a database path and an explicit
+client access policy. Call the same engine that local MCP clients use.
 
-Applications can import `Brain` from `berry_brain.engine`, supply a database path and an
-explicit client policy, and call the same engine used by local MCP clients.
-Client names have no special privileges. `room_local` policy enables room scopes
-and requires a matching project room grant. Hosts must authenticate callers and
-bind room IDs to trusted request context before passing them to the engine.
+Client names grant no special access. The `room_local` policy enables room scopes.
+It requires a matching project room grant.
 
-The HTTP client uses `Authorization: Bearer ...` and `X-Brain-Client` headers.
-Its config contains `url`, `identity`, and `token_file`. The host implements
-`GET /v1/brain/tools` and `POST /v1/brain/{action}` with the engine's contract.
-Hosting code, provider transport, credentials, and deployment settings belong to
-the consuming application. They are not part of this package.
+The host must verify callers. It must take room IDs from trusted request context
+before it passes them to the engine.
 
-## Quality and sharing
+For HTTP access, the client config has three fields:
 
-Code tests check storage and learning rules. They do not prove better model
-results. For that, compare fresh representative tasks with and without memory.
-Keep the model and scoring fixed. Measure failures, output quality, time, and
-cost. Do not use lesson-creation examples as fresh evidence of improvement.
+| Field | Purpose |
+| --- | --- |
+| `url` | Brain service URL |
+| `identity` | Client identity |
+| `token_file` | Path to the private token file |
+
+The HTTP client sends `Authorization: Bearer ...` and `X-Brain-Client` headers.
+The host must provide these routes with the engine's request and response format:
+
+- `GET /v1/brain/tools`
+- `POST /v1/brain/{action}`
+
+The host application owns hosting code, model calls, credentials, and deployment
+settings. Keep them outside this package.
+
+## Check model quality
+
+Code tests check storage and learning rules. They do not prove that memory improves
+model results.
+
+To measure that, compare new tasks with and without memory. Choose tasks that
+represent real work. Keep the model and scoring rules fixed.
+Measure failures, answer quality, time, and cost.
+
+Do not use the examples that created a lesson as new proof that it helps.
+
+## Share source safely
 
 The code uses the [MIT license](../LICENSE). Tests and examples use synthetic data.
-Do not include private `.env` files, credentials, databases, backups, or native
-client state when sharing source.
+Keep these files out of shared source:
 
-Existing private Git history can contain personal names and deployment details,
-even after current files are cleaned. Do not make that history public. A first
-GitHub release must start from the reviewed source snapshot with fresh history
-and a reviewed public author identity. Keep one source project; no separate code
-fork is needed. Keep the old history private. Never merge it into public branches.
+- Private `.env` files and credentials.
+- Databases and backups.
+- Native client state.
+
+Private Git history can contain personal names and deployment details, even after
+you clean the current files.
+
+When first publishing a private project, start with a reviewed source snapshot and
+fresh history. Check the public author identity. Keep the old history private.
+Never merge it into public branches.
+
+Keep one source project. A separate code fork is not needed.
 
 ## Upgrade from 0.2
 
-Version 0.3 moves the modules into the `berry_brain` package. It keeps the CLI
-command names and database paths. Install the update, rerun the same
-`berry-brain-configure` commands, and reopen client sessions. This replaces
-registrations that point to the old module file. The new registration uses
-Python's isolated mode so files in a task directory cannot shadow the package.
+Version 0.3 moves the modules into the `berry_brain` package. The CLI command names
+and database paths stay the same.
 
-Applications that import the library must update their imports:
+1. Install the update.
+2. Repeat your existing `berry-brain-configure` commands.
+3. Reopen client sessions.
+
+This replaces registrations that point to the old module file. The new registration
+uses Python's isolated mode. This stops files in a task directory from taking the
+place of the installed package.
+
+Update library imports:
 
 | Old import | New import |
 | --- | --- |
@@ -86,12 +128,15 @@ Applications that import the library must update their imports:
 | `brain_client` | `berry_brain.client` |
 | `configure_client` | `berry_brain.configure` |
 
-Update host launchers to `python -I -m berry_brain.client` with the existing
-arguments. Use the Python executable from the installed environment.
-The database and learning rules do not need a new format for this layout.
+Update host launchers to `python -I -m berry_brain.client`. Keep the existing
+arguments and use the Python executable from the installed environment.
+The database format and learning rules do not change for this source layout.
 
-The adapter rejects malformed requests before it can save data. It uses the
+## Request errors
+
+The adapter rejects invalid requests before it can save data. It follows the
 [MCP request ID rules](https://modelcontextprotocol.io/specification/2025-06-18/basic)
-and [JSON-RPC error codes](https://www.jsonrpc.org/specification).
-HTTP error responses expose only the status code. A remote error body can
-contain reflected credentials, so the adapter does not pass that body to clients.
+and uses [JSON-RPC error codes](https://www.jsonrpc.org/specification).
+
+HTTP errors expose only the status code. A remote error body can contain reflected
+credentials. The adapter does not pass that body to clients.

@@ -2,9 +2,15 @@
 
 [Home](../README.md) · [Learning](learning.md) · [Development](development.md)
 
-## Install and connect
+## Install
 
-From a downloaded or cloned source directory, install into a virtual environment:
+You need Python 3.11 or later with SQLite FTS5 support. Standard Python builds
+include FTS5. Install your AI clients first. The Codex command must be on your
+`PATH`.
+
+Download or clone this repository. Open a terminal in its directory.
+
+### Linux and macOS
 
 ```sh
 python3 -m venv .venv
@@ -13,92 +19,132 @@ python3 -m venv .venv
 .venv/bin/berry-brain-configure claude --local
 ```
 
-On Debian or Ubuntu, install the matching `python3-venv` package if the first
-command reports that `ensurepip` is missing.
+On Debian or Ubuntu, a missing `ensurepip` error can mean that `python3-venv` is
+not installed. Install the package that matches your Python version, then retry.
 
-On Windows, use `py -3 -m venv .venv`, then use `.venv\Scripts\python.exe`
-and `.venv\Scripts\berry-brain-configure.exe` for the same steps.
-Install the clients first. The Codex CLI must be available on your PATH.
-Keep the virtual environment at this location: registration saves its absolute path.
-After source updates, run the install and configure commands again. Reopen client sessions to load
-new code. Existing data stays in its separate data directory.
+### Windows
 
-Setup registers the tools and adds a short brain reminder to the client's global
-instructions. It updates only the marked Berry Brain section.
-Other text stays intact. Rerunning setup updates the section without adding a
-duplicate.
-Codex registration uses its CLI. Claude registration updates only the
-`berry-brain` entry in its user JSON settings, so repeat setup also works.
-The reminder text has one source in [`configure.py`](../src/berry_brain/configure.py); detailed learning
-rules stay in the MCP tool descriptions.
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install .
+.venv\Scripts\berry-brain-configure.exe codex --local
+.venv\Scripts\berry-brain-configure.exe claude --local
+```
 
-Codex uses `AGENTS.md` in `CODEX_HOME` (normally `~/.codex`), or its nonempty
-`AGENTS.override.md` when present. Claude uses `CLAUDE.md` in `CLAUDE_CONFIG_DIR`
-(normally `~/.claude`). Existing symlinks are preserved. If Claude's file contains
-only one `@file` import, setup updates that existing file and preserves the wrapper.
-For more complex import layouts, keep the reminder in one chosen shared file.
-The installer does not parse a full Markdown import tree.
-Malformed reminder sections stop setup before it changes a registration.
+Run the setup command for each client you use. Reopen its sessions after setup.
+Ask the agent to check its `brain_*` tools, recall a task, and save a checked result.
 
-Both clients use the same local database and the project `default`. Start a new
-session after registration. Ask the agent to check its `brain_*` tools, recall a
-task, and save a small checked outcome. Installation makes the tools available;
-it does not force a client to use them on every task.
+Both clients use the same database and the project `default`. Setup makes the
+tools available. It does not force the client to use memory on each task.
 
-For separate project scopes, register each client with the same project list:
+Keep the virtual environment at this path. Setup saves its full path.
+After source updates, repeat the install and setup commands. Then reopen client
+sessions. The saved data stays in its separate directory.
+
+## Global instructions
+
+Setup adds a short brain reminder to the client's global instructions.
+It changes only the marked Berry Brain section. Other text stays intact.
+Repeated setup updates the same section.
+
+| Client | Instruction file |
+| --- | --- |
+| Codex | `AGENTS.md` in `CODEX_HOME`, normally `~/.codex` |
+| Claude Code | `CLAUDE.md` in `CLAUDE_CONFIG_DIR`, normally `~/.claude` |
+
+For Codex, setup uses a nonempty `AGENTS.override.md` if one exists.
+It preserves existing symbolic links.
+
+If Claude's file contains only one `@file` import, setup follows that import.
+It updates the target file and keeps the import. For more complex imports, keep
+one reminder in your chosen shared file. Setup does not read a full import tree.
+
+Invalid reminder markers stop setup before it changes the client registration.
+Codex setup uses the Codex CLI. Claude setup updates only the `berry-brain` entry
+in its user JSON settings.
+
+The reminder has one source in [configure.py](../src/berry_brain/configure.py).
+The tool descriptions hold the detailed learning rules.
+
+## Project access
+
+To keep task records in separate projects, give both clients the same project list:
 
 ```sh
 .venv/bin/berry-brain-configure codex --local --project app-one --project app-two
 .venv/bin/berry-brain-configure claude --local --project app-one --project app-two
 ```
 
-This replaces that client's `berry-brain` registration. Include all projects it
-should use. Removing a project from the list does not delete its saved data.
-For other clients, register `.venv/bin/berry-brain --local --identity my-client`
-as a stdio MCP server. Add the same `--project` options as needed.
+This replaces the client's `berry-brain` registration. Include every project it
+needs. Removing access to a project does not delete that project's data.
 
-An existing server user should keep their current `--config` registration. Local
-mode creates separate storage; it does not import or replace a server database.
-The hosting application owns its authentication and deployment settings.
+For another MCP client, register this command as a stdio MCP server:
 
-## Data and privacy
+```sh
+.venv/bin/berry-brain --local --identity my-client
+```
 
-Default database locations:
+Add the same `--project` options if needed. Stdio means the client exchanges
+messages with the brain through the process input and output.
 
-| System | Location |
+## Data location
+
+| System | Default database path |
 | --- | --- |
 | Linux | `$XDG_DATA_HOME/berry-brain/brain.sqlite3`, or `~/.local/share/berry-brain/brain.sqlite3` |
 | macOS | `~/Library/Application Support/berry-brain/brain.sqlite3` |
 | Windows | `%LOCALAPPDATA%\berry-brain\brain.sqlite3` |
 
-Use `--data-dir /absolute/private/directory` on both client registrations to choose
-another location. Keep it outside the source tree and on a local disk. Do not
-synchronize the live SQLite database through file-sync services or network shares.
-For access from several machines, run the MCP process on one host through SSH,
-or use an application that hosts the brain API. Keep the database on that host.
+To choose another path, add `--data-dir /absolute/private/directory` to both client
+setup commands. Use a local disk outside the source directory.
 
-Local mode makes no network requests and has no telemetry. Recalled text goes to
-the connected AI client and can reach its model provider under that client's data
-policy. Records are not encrypted by this package. Use your OS disk encryption
-and account permissions. On Linux and macOS, the data directory must have mode
-`0700` and its database files mode `0600`. Windows uses the user's folder ACLs.
+Do not place the live database on a network share or use file sync to copy it.
 
-Project scopes limit tool access; local mode trusts the OS account. Any process
-that can read the database can read its content. Use an authenticated hosting application for
-clients that need separate credentials. Never save secrets, personal facts, raw
-transcripts, or hidden reasoning. The tool instructions prohibit these; there is
-no automatic filter that can guarantee their removal.
+For access from several machines, keep one database on one host. Run the MCP
+process there through SSH, or use an application that hosts the brain API.
 
-For backup, close connected clients and copy the whole data directory. Restore
-it only while clients are closed. Software updates do not delete it.
+If you already use a server, keep your current `--config` setup. Local mode creates
+separate storage. It does not import or replace server data. The host application
+owns login checks and deployment settings.
+
+## Privacy
+
+Local mode makes no network requests and sends no telemetry. Recalled text goes
+to the AI client. The client can send it to its model provider under its data policy.
+
+The package does not encrypt records. Use disk encryption and account permissions.
+
+| System | Access controls |
+| --- | --- |
+| Linux and macOS | Data directory mode `0700`; database file modes `0600` |
+| Windows | The user's folder access rules, or ACLs |
+
+Project access rules apply to the tools. Local mode trusts the OS account.
+Any process that can read the database can read its contents. Use a host with
+login checks if clients need separate credentials.
+
+Do not save secrets, private personal facts, raw conversations, or hidden reasoning.
+The tool instructions prohibit these records. There is no automatic filter that
+can ensure their removal.
+
+## Backup and restore
+
+1. Close the connected clients.
+2. Copy the whole data directory to a private backup location.
+3. Reopen the clients.
+
+Close the clients before you restore a backup. Keep backups out of Git.
+Software updates do not delete saved data.
 
 ## Failed connections
 
-In hosted mode, a failed connection or invalid reply does not prove that a save
-failed. Check the saved state when access returns, or retry with the exact same
-arguments. Keep the same event ID and expected version. The client does not retry
-saves automatically. For a read request, this warning does not mean data changed.
+A failed connection or invalid server reply does not prove that a save failed.
+The server might have saved the data before the connection failed.
 
-Check access through the URL in the client config, including any proxy in that
-path. A healthy server reached by a different URL does not prove the client path
-works. Error messages omit remote error bodies and failed response content.
+When access returns, check the saved state. Or retry with the exact same arguments.
+Keep the same event ID and expected version. The client does not retry saves
+on its own. For a read request, the warning does not mean that data changed.
+
+Check the URL in the client config and any proxy on that path. A healthy response
+from another URL does not prove that the client's path works.
+Error messages omit remote error bodies and failed response content.
