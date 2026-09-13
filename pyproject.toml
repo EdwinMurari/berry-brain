@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "berry-brain"
-version = "0.3.0"
+version = "0.3.1"
 description = "Private project memory and evidence-based lesson reuse across AI clients"
 readme = "README.md"
 license = "MIT"

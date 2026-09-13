@@ -3,6 +3,7 @@
 
 import argparse
 from importlib.metadata import version as package_version
+import http.client
 import json
 import os
 import stat
@@ -65,8 +66,12 @@ class Client:
             # An error body can reflect credentials sent in the request.
             exc.close()
             raise RuntimeError(f"brain HTTP {exc.code}: request failed") from None
-        except (TimeoutError, urllib.error.URLError) as exc:
-            raise RuntimeError("brain unavailable; mutation status may be unknown. Retry identical arguments.") from exc
+        except (TimeoutError, ConnectionError, urllib.error.URLError, http.client.HTTPException):
+            raise RuntimeError("Brain connection failed. For a save, the result is unknown. "
+                               "Retry with the same arguments.") from None
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise RuntimeError("Brain returned an invalid reply. For a save, the result is unknown. "
+                               "Retry with the same arguments.") from None
 
 
 def dispatch(client, message):

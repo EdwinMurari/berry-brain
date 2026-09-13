@@ -91,3 +91,14 @@ no automatic filter that can guarantee their removal.
 
 For backup, close connected clients and copy the whole data directory. Restore
 it only while clients are closed. Software updates do not delete it.
+
+## Failed connections
+
+In hosted mode, a failed connection or invalid reply does not prove that a save
+failed. Check the saved state when access returns, or retry with the exact same
+arguments. Keep the same event ID and expected version. The client does not retry
+saves automatically. For a read request, this warning does not mean data changed.
+
+Check access through the URL in the client config, including any proxy in that
+path. A healthy server reached by a different URL does not prove the client path
+works. Error messages omit remote error bodies and failed response content.

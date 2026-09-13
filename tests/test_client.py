@@ -2,6 +2,7 @@
 
 import json
 import io
+import http.client
 import importlib.metadata
 import urllib.error
 import os
@@ -163,6 +164,24 @@ class LocalTests(unittest.TestCase):
             client.request("tools")
         self.assertNotIn(client.token, str(caught.exception))
         self.assertIn("403", str(caught.exception))
+
+    def test_broken_http_replies_are_safe_tool_errors(self):
+        token = self.root.parent / "test.token"
+        token.write_text("private-example-token")
+        token.chmod(0o600)
+        client = Client({"url": "https://brain.example.org", "identity": "test", "token_file": str(token)})
+        message = {"method": "tools/call", "params": {"name": "brain_checkpoint", "arguments": {}}}
+        for failure in (ConnectionResetError("private-example-token"),
+                        http.client.IncompleteRead(b"private-example-token", 100), TimeoutError()):
+            with self.subTest(failure=type(failure).__name__), patch.object(client.http, "open", side_effect=failure):
+                result = dispatch(client, message)
+                self.assertTrue(result["isError"])
+                self.assertNotIn(client.token, result["content"][0]["text"])
+                self.assertIn("same arguments", result["content"][0]["text"])
+        with patch.object(client.http, "open", return_value=io.BytesIO(b"private-example-token")):
+            result = dispatch(client, message)
+            self.assertTrue(result["isError"])
+            self.assertNotIn(client.token, result["content"][0]["text"])
 
     def test_http_config_rejects_bad_headers_without_echoing_token(self):
         token = self.root.parent / "test.token"
