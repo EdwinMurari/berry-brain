@@ -1,0 +1,81 @@
+name: berry-memory
+
+services:
+  web:
+    image: berry-memory:${BERRY_IMAGE_REVISION:-dev}
+    build:
+      context: .
+      target: runtime
+    user: "1000:1000"
+    env_file:
+      - ${BERRY_CONFIG_DIR:?Set BERRY_CONFIG_DIR in .env}/berry-memory.env
+    environment:
+      BERRY_LLM_BASE_URL: ${BERRY_LLM_BASE_URL:?Set BERRY_LLM_BASE_URL in .env}
+      BERRY_BRAIN_MODEL: ${BERRY_BRAIN_MODEL:-}
+    ports:
+      - "127.0.0.1:7122:8080"
+    volumes:
+      - ${BERRY_DATA_DIR:?Set BERRY_DATA_DIR in .env}/web:/data
+      - ${BERRY_CONFIG_DIR:?Set BERRY_CONFIG_DIR in .env}:/run/secrets:ro
+      - ./server.py:/app/server.py:ro
+      - ./brain.py:/app/brain.py:ro
+      - ./brain_learning.py:/app/brain_learning.py:ro
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "/app/server.py", "--health-check"]
+      interval: 15s
+      timeout: 15s
+      retries: 12
+      start_period: 30s
+    stop_grace_period: 30s
+    restart: unless-stopped
+    pids_limit: 192
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      berry.name: "Berry Memory"
+      berry.service: "berry-memory"
+      berry.port: "7122"
+      berry.backup: "true"
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.0@sha256:b3063c673f3973877c038eeecc392bad5011f072ee7892b56c9a8e204a3bdea9
+    user: "1000:1000"
+    volumes:
+      - ${BERRY_DATA_DIR:?Set BERRY_DATA_DIR in .env}/qdrant:/qdrant/storage
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /qdrant/snapshots:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/6333; printf 'GET /readyz HTTP/1.0\\r\\n\\r\\n' >&3; head -n 1 <&3 | grep -q ' 200 '"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    stop_grace_period: 30s
+    restart: unless-stopped
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

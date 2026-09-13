@@ -1,0 +1,29 @@
+{
+  "clients": {
+    "codex": {
+      "projects": {
+        "my-project": {
+          "write": true
+        }
+      }
+    },
+    "claude": {
+      "projects": {
+        "my-project": {
+          "write": true
+        }
+      }
+    },
+    "berry-agents": {
+      "room_local": true,
+      "projects": {
+        "my-project": {
+          "write": true,
+          "rooms": [
+            "!example:matrix.example.org"
+          ]
+        }
+      }
+    }
+  }
+}

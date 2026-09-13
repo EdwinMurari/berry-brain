@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+data
+__pycache__
+*.pyc
+.venv
+secrets
+*.sqlite*
+*.db*
+*.token
+*.key
+*.pem
+*.log
+*.egg-info
+dist
+build
