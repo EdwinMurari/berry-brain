@@ -79,7 +79,8 @@ class LocalTests(unittest.TestCase):
         command = [sys.executable, "-I", "-m", "berry_brain.client",
                    "--local", "--data-dir", str(self.root), "--identity", identity, "--project", "demo"]
         result = subprocess.run(command, input="".join(json.dumps(m) + "\n" for m in messages),
-                                capture_output=True, text=True, check=True, timeout=30)
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
         return [json.loads(line) for line in result.stdout.splitlines()]
 
