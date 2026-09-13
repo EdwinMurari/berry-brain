@@ -176,8 +176,19 @@ class Brain:
         self.policy = BrainPolicy.model_validate(policy).model_dump()
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.db() as db:
+            # Changing journal mode can return BUSY without using SQLite's busy
+            # timeout when another client opens the database at the same time.
+            deadline = time.monotonic() + 15
+            while True:
+                try:
+                    db.execute("PRAGMA journal_mode=WAL")
+                    break
+                except sqlite3.OperationalError as exc:
+                    if exc.sqlite_errorcode != sqlite3.SQLITE_BUSY or time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.05)
             db.executescript("""
-                PRAGMA journal_mode=WAL;
+                BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS records (
                     id TEXT PRIMARY KEY, scope TEXT NOT NULL, kind TEXT NOT NULL,
                     task TEXT NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL,
@@ -201,8 +212,7 @@ class Brain:
                     hash TEXT NOT NULL, response TEXT NOT NULL, PRIMARY KEY(scope,actor,event_id));
                 CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(id UNINDEXED, scope UNINDEXED, text);
             """)
-            # Serialize schema checks with upgrades from other client processes.
-            db.execute("BEGIN IMMEDIATE")
+            # The schema transaction also protects checks for older columns.
             if "response" not in {r[1] for r in db.execute("PRAGMA table_info(feedback)")}:
                 db.execute("ALTER TABLE feedback ADD COLUMN response TEXT NOT NULL DEFAULT '{}'")
             # Recheck existing promotions once when upgrading the evidence rule.
