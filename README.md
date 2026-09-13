@@ -17,6 +17,9 @@ python3 -m venv .venv
 .venv/bin/berry-brain-configure claude --local
 ```
 
+On Debian or Ubuntu, install the matching `python3-venv` package if the first
+command reports that `ensurepip` is missing.
+
 On Windows, use `py -3 -m venv .venv`, then use `.venv\Scripts\python.exe`
 and `.venv\Scripts\berry-brain-configure.exe` for the same steps.
 Install the clients first. The Codex CLI must be available on your PATH.
