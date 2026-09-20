@@ -81,7 +81,10 @@ a minimum reuse rule. They are not proof that a lesson helps every task.
 
 ## Recall limits
 
-Recall uses keyword search. Its whole response fits within 24 KB.
+Recall uses keyword search. A host can add optional lesson selection.
+Supply known current facts in the recall `context` field when useful. Saved
+checkpoints remain historical. Selection does not change learning or access rules.
+Its whole response fits within 24 KB.
 This includes task state, up to 12 lessons, and receipt data for feedback.
 An empty query loads task state only.
 

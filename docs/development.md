@@ -140,3 +140,26 @@ and uses [JSON-RPC error codes](https://www.jsonrpc.org/specification).
 
 HTTP errors expose only the status code. A remote error body can contain reflected
 credentials. The adapter does not pass that body to clients.
+
+## Optional lesson selection
+
+A host can pass `selector` to `Brain(path, policy, selector=select)`.
+The function receives a state object and a list of allowed active lessons.
+State contains `query`, `current_context`, and a historical `saved_checkpoint`.
+Each lesson contains its ID, text, and conditions.
+
+Return one choice per lesson ID: `keep`, `drop`, or `uncertain`.
+Return `None` when selection is not configured. Only `drop` removes a lesson
+from this response. It does not delete or retire it.
+
+The host owns model calls, keys, input limits, timeouts, and spending limits.
+No key or network client is part of this package. Local mode stays offline.
+
+The engine calls the selector outside its database transaction. Before returning,
+it checks the current checkpoint and candidate versions again. If state changed,
+it uses fresh normal recall. It also uses normal recall if selection fails or
+returns invalid IDs or choices. The response reports `unavailable` or
+`state_changed` when that happens. Receipts cover only returned lessons.
+
+An empty query or no matching lessons makes no selection call. Responses still
+fit within 24 KB. Selection cannot find lessons missed by keyword search.

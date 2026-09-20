@@ -6,6 +6,7 @@ import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Literal
@@ -57,6 +58,7 @@ class Body(BaseModel):
 class Recall(Body):
     query: str = Field(default="", max_length=2000)
     limit: int = Field(default=6, ge=1, le=12)
+    context: str = Field(default="", max_length=4000)
 
 
 class Evidence(BaseModel):
@@ -133,7 +135,7 @@ class Revise(Body):
 MODELS = {"recall": Recall, "record": Record, "propose": Propose, "trial": Trial,
           "feedback": Feedback, "checkpoint": Checkpoint, "history": History, "revise": Revise}
 DESCRIPTIONS = {
-    "recall": "Recall when saved task state or past experience could affect the next decision. Reuse sufficient context already loaded; recall again if relevant shared state may have changed. Use a focused query for active lessons; empty query returns task state only. Results fit within 24 KB. Check lesson conditions, current facts and linked skill revisions before use. Read live status from the owning tool or service. Task previews are marked; use history with record_id for full state before resuming or updating them. Returns receipt IDs for outcome feedback. Use a stable task ID across resumes. Omit project only when the client has room-local access.",
+    "recall": "Recall when saved task state or past experience could affect the next decision. Reuse sufficient context already loaded; recall again if relevant shared state may have changed. Use a focused query for active lessons. Supply concise current facts in context when known; do not invent them. Empty query returns task state only. Results fit within 24 KB. Check lesson conditions, current facts and linked skill revisions before use. Read live status from the owning tool or service. Task previews are marked; use history with record_id for full state before resuming or updating them. Returns receipt IDs for outcome feedback. Use a stable task ID across resumes. Omit project only when the client has room-local access.",
     "record": "Record one meaningful experience with exact source excerpts. event_id must stay unchanged on retries. Record failures too. Never save secrets, personal facts, raw transcripts or speculative claims as observed results.",
     "propose": "Propose a conditional lesson from recorded experiences in this scope. It remains a candidate until helpful results with distinct evidence on two fresh tasks, with no harmful feedback. Link a superseded lesson when correcting it. For a tested skill method, include its canonical name and full Git revision. Promotion does not publish or edit a skill; use the canonical catalogue's review and validation process.",
     "trial": "Read a candidate explicitly for a fresh-task experiment. Returns a receipt required for feedback. Candidate text is unverified; retain all current permissions and checks.",
@@ -168,7 +170,8 @@ class BrainError(Exception):
 
 
 class Brain:
-    def __init__(self, path: Path, policy: dict):
+    def __init__(self, path: Path, policy: dict, *, selector: Callable[[dict, list[dict]], dict[str, str] | None] | None = None):
+        self.selector = selector
         self.path = path
         self.policy = BrainPolicy.model_validate(policy).model_dump()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,6 +280,8 @@ class Brain:
             raise BrainError(404, "unknown brain action")
         body = MODELS[action].model_validate(data)
         scope = self.scope(actor, body, action not in READ_ACTIONS)
+        if action == "recall":
+            return self.recall(scope, actor, body)
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
             return getattr(self, action)(db, scope, actor, body)
@@ -350,7 +355,7 @@ class Brain:
                    (receipt_id, scope, task, actor, encode(versions), time.time()))
         return receipt_id
 
-    def recall(self, db, scope, actor, body):
+    def recall_candidates(self, db, scope, actor, body):
         checkpoint = db.execute("SELECT * FROM records WHERE scope=? AND kind='task' AND task=?",
                                 (scope, body.task_id)).fetchone()
         scopes = [scope]
@@ -376,6 +381,44 @@ class Brain:
                       (scope, body.task_id)).fetchall()] if not checkpoint else [],
                   "lessons": [],
                   "notice": "Saved state is historical. Check lesson conditions and current facts before use. A task preview omits details: read history by record_id before resuming or updating it. Active lessons reflect attributed reports, not independent proof."}
+        return result, rows
+
+    def recall(self, scope, actor, body):
+        with self.db() as db:
+            result, rows = self.recall_candidates(db, scope, actor, body)
+        choices, selection = None, None
+        if rows and self.selector is not None:
+            state = {"query": body.query, "current_context": body.context,
+                     "saved_checkpoint": result["checkpoint"]}
+            lessons = [{"id": row["id"], **{key: json.loads(row["body"])[key]
+                        for key in ("lesson", "conditions")}} for row in rows]
+            try:
+                # The host owns transport. Never hold a database lock on the network.
+                choices = self.selector(state, lessons)
+                if choices is not None:
+                    if (not isinstance(choices, dict) or set(choices) != {r["id"] for r in rows}
+                            or any(value not in {"keep", "drop", "uncertain"} for value in choices.values())):
+                        raise ValueError("invalid selection")
+                    selection = {"status": "applied"}
+            except Exception:
+                # Do not expose provider errors or treat a failed check as empty recall.
+                choices, selection = None, {"status": "unavailable"}
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current, fresh_rows = self.recall_candidates(db, scope, actor, body)
+            if (current != result or [(r["id"], r["version"]) for r in fresh_rows]
+                    != [(r["id"], r["version"]) for r in rows]):
+                choices = None
+                if selection is not None:
+                    selection = {"status": "state_changed"}
+            result, rows = current, fresh_rows
+            if selection is not None:
+                result["selection"] = selection
+            if choices is not None:
+                rows = [row for row in rows if choices[row["id"]] != "drop"]
+            return self.pack_recall(db, scope, actor, body, result, rows)
+
+    def pack_recall(self, db, scope, actor, body, result, rows):
         selected = []
         for row in rows:
             # Reserve the receipt's exact size before committing to the response.
