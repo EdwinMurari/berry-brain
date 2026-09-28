@@ -44,14 +44,10 @@ the checkpoint.
 A candidate is a proposed lesson. It stays out of normal recall until it passes
 the reuse rule.
 
-```mermaid
-flowchart TD
-    Result[Saved result and evidence] --> Candidate[Proposed lesson]
-    Candidate --> Test[Test on later tasks]
-    Test -->|Two helpful tasks with distinct evidence| Active[Active lesson]
-    Test -->|Harmful feedback| Retired[Retired lesson]
-    Active -->|Harmful feedback| Retired
-```
+![Saved experiences support proposed lessons. Agents test candidates on fresh tasks. Two helpful tasks with distinct evidence activate a lesson; harmful feedback retires it. Active lessons can return in later recall.](images/learning-flow.svg)
+
+[Open full size](images/learning-flow.svg) ·
+[Editable Excalidraw source](images/learning-flow.excalidraw)
 
 1. Propose a lesson from saved results. State when it applies.
 2. Use `history` to find a candidate for a new task.

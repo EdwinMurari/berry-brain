@@ -50,13 +50,19 @@ Use the Python build tool:
 .venv/bin/python -m build
 ```
 
-## Edit the product diagram
+## Edit the product diagrams
 
-Open [how-it-works.excalidraw](images/how-it-works.excalidraw) in Excalidraw.
-Save the edited scene and export it as `docs/images/how-it-works.svg` with a light
-background. Keep both files together in the same commit. The README embeds the
-SVG and links to the editable scene. Check the image at the README's display size
-so labels fit inside their boxes and remain readable.
+Open the scene in Excalidraw:
+
+- [Prompt to saved memory](images/how-it-works.excalidraw).
+- [Experience to reusable lesson](images/learning-flow.excalidraw).
+
+Save the edited scene and export its matching SVG under `docs/images/` with a
+light background. Keep each scene and SVG together in the same commit. The README
+embeds both diagrams and links to their editable scenes. The learning guide reuses
+the lesson diagram. Check each image at the README's display size so labels fit
+inside their boxes and remain readable. Keep the SVG title and description useful
+for readers who cannot see the image.
 
 ## Connect a host application
 

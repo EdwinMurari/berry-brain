@@ -20,23 +20,47 @@ to the project. Each new installation starts empty.
 
 ## How it works
 
-![Berry Brain flow: an agent recalls allowed task state and lessons, optionally checks lesson relevance with Jev, then continues work. Checked results can become lessons after two helpful tests on new tasks.](docs/images/how-it-works.svg)
+Your prompt goes to the agent. The agent calls Brain when saved progress or past
+lessons could affect its next decision. Recall and saves are explicit tool calls;
+they do not happen automatically on every message.
+
+![Prompt-to-memory flow: the agent decides whether to recall, checks live facts, does the work, then saves useful progress as a checkpoint or a result with evidence as an experience.](docs/images/how-it-works.svg)
 
 [Open the full-size diagram](docs/images/how-it-works.svg) ·
 [Editable Excalidraw source](docs/images/how-it-works.excalidraw)
 
-1. **Recall.** The agent asks for saved task state and lessons that match its
-   current task. Access rules limit which project records it can read.
-2. **Check and act.** The agent checks the memory against current facts, then
-   does the work. An optional relevance check can filter the returned lessons.
-3. **Save the outcome.** The agent records the result, its evidence, and the next
-   step. This gives a later session a place to resume.
-4. **Test what transfers.** A useful result can become a proposed lesson with
-   clear conditions for reuse.
+The agent can save during work, before a hand-off, or after a checked outcome.
+It does not need to wait until its final answer. Brain stores the submitted fields,
+not the whole conversation. Access rules limit which project records each client
+can read.
 
-A proposed lesson stays out of normal recall until clients report helpful results
-from two new tasks, each with distinct evidence. Harmful feedback stops reuse.
-These reports are a reuse rule, not independent proof that the lesson is correct.
+| What is saved | What it means | When it is used |
+| --- | --- | --- |
+| **Checkpoint** | Task memory: goal, checked progress, and next step | Recall to resume the task |
+| **Experience** | Result memory: problem, action, outcome, and evidence | Read history or propose a lesson |
+| **Candidate lesson** | An idea about what could help in similar situations | Explicit tests on later tasks; excluded from normal recall |
+| **Active lesson** | Reusable knowledge: a tested method with conditions | Normal recall when the lesson matches the task |
+
+## How memory becomes reusable knowledge
+
+Saving a result does not make it a lesson. An agent must propose a lesson, or a
+configured host worker can draft one. The proposal stays a candidate until agents
+test it on later tasks and report the outcomes.
+
+![Lesson flow: a saved experience supports a candidate, later tasks test it, two helpful fresh tasks with distinct evidence activate it, and harmful feedback retires it. Active lessons can return in future recall.](docs/images/learning-flow.svg)
+
+[Open the full-size lesson diagram](docs/images/learning-flow.svg) ·
+[Editable Excalidraw source](docs/images/learning-flow.excalidraw)
+
+For example, an import fix can produce a checkpoint: “Validation passes; deployment
+next.” An experience records the cause, fix, and test evidence. A proposed lesson
+might say, “When an import fails, check required inputs before retrying.” It becomes
+active only after helpful reports from two fresh tasks with distinct evidence.
+The source tasks and evidence do not count. Harmful feedback retires the lesson.
+
+Brain checks these evidence rules when feedback arrives. It does not independently
+verify reported outcomes. In local mode, there is no background worker: learning
+happens when an agent calls the tools.
 
 Memory changes the context given to the model. It does not train the model or
 ensure better answers. Saved text is evidence. It cannot grant permission or
