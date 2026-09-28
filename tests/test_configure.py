@@ -19,6 +19,27 @@ class InstructionTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.path = self.root / "AGENTS.md"
 
+    def test_local_registration_passes_only_the_selection_config_path(self):
+        config = self.root / "evaluation.json"
+        config.write_text('{"url":"https://model.example/evaluate"}')
+        args = ["setup", "codex", "--local", "--selection-config", str(config)]
+        with patch.object(sys, "argv", args), patch.object(setup, "register_client") as register, \
+                patch.object(setup, "global_instructions", return_value=self.path), \
+                patch.object(setup.subprocess, "run") as run:
+            run.return_value.stdout = json.dumps({"tools": [{}]})
+            setup.main()
+            command = register.call_args.args[1]
+            self.assertEqual(command[command.index("--selection-config") + 1], str(config))
+            self.assertNotIn("https://model.example/evaluate", " ".join(command))
+            self.assertEqual(run.call_args.args[0], [*command, "--call", "tools"])
+
+    def test_server_registration_rejects_local_selection_settings(self):
+        with patch.object(sys, "argv", ["setup", "codex", "--config", "server.json", "--selection-config", "model.json"]), \
+                patch.object(setup, "global_instructions", return_value=self.path), \
+                patch.object(setup.subprocess, "run") as run, self.assertRaises(SystemExit):
+            setup.main()
+        run.assert_not_called()
+
     def test_new_install_and_repeat_leave_one_block(self):
         setup.install_instructions(self.path)
         first = self.path.read_bytes()

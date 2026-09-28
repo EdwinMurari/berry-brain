@@ -1,4 +1,4 @@
-"""Local storage adapter. Uses the service's engine without HTTP or model calls."""
+"""Local storage with the shared engine and optional configured selection."""
 
 import os
 import re
@@ -50,14 +50,18 @@ def private_database(directory: Path) -> Path:
 
 
 class LocalClient:
-    def __init__(self, directory: Path, identity: str, projects: list[str]):
+    def __init__(self, directory: Path, identity: str, projects: list[str], *, selection_config: Path | None = None):
         if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", identity):
             raise ValueError("use a client name with lowercase letters, digits, dots, dashes or underscores")
         if not projects or any(not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,79}", p) for p in projects):
             raise ValueError("provide at least one project name using lowercase letters, digits, dots, dashes or underscores")
         self.identity = identity
         policy = {"clients": {identity: {"projects": {p: {"write": True} for p in projects}}}}
-        self.brain = Brain(private_database(directory), policy)
+        selector = None
+        if selection_config is not None:
+            from .evaluation_http import configured_selector
+            selector = configured_selector(selection_config)
+        self.brain = Brain(private_database(directory), policy, selector=selector)
 
     def request(self, path, data=None):
         try:

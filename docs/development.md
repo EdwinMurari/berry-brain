@@ -10,6 +10,8 @@ The package has one brain engine. Local clients and host applications use it.
 | --- | --- |
 | [engine.py](../src/berry_brain/engine.py) | Records, recall, access checks, and lesson rules |
 | [learning.py](../src/berry_brain/learning.py) | Candidate generation within set limits |
+| [selection.py](../src/berry_brain/selection.py) | Shared lesson selector and typed evaluator interface |
+| [evaluation_http.py](../src/berry_brain/evaluation_http.py) | Configurable evaluation HTTP adapter |
 | [local.py](../src/berry_brain/local.py) | Local paths, file permissions, and client access |
 | [client.py](../src/berry_brain/client.py) | MCP messages and HTTP requests |
 | [configure.py](../src/berry_brain/configure.py) | Client setup and shared reminder text |
@@ -81,8 +83,9 @@ The host must provide these routes with the engine's request and response format
 - `GET /v1/brain/tools`
 - `POST /v1/brain/{action}`
 
-The host application owns hosting code, model calls, credentials, and deployment
-settings. Keep them outside this package.
+The host application owns hosting code, credentials, and deployment settings.
+Lesson selection uses the package's shared selector with an evaluation adapter.
+Other host model calls, such as background proposal generation, remain host-owned.
 
 ## Check model quality
 
@@ -151,17 +154,39 @@ credentials. The adapter does not pass that body to clients.
 
 ## Optional lesson selection
 
-A host can pass `selector` to `Brain(path, policy, selector=select)`.
-The function receives a state object and a list of allowed active lessons.
-State contains `query`, `current_context`, and a historical `saved_checkpoint`.
-Each lesson contains its ID, text, and conditions.
+Use `LessonSelector(evaluator)` for both local and hosted selection. The selector
+owns the questions, input bounds, and answer validation. An evaluator implements
+the typed `Evaluator` protocol: `evaluate(state, questions)` returns a map of typed
+Choice answers, or `None` when explicitly disabled. It raises on failure. Each
+answer has `type: "choice"` and `choice: "keep" | "drop" | "uncertain"`.
 
-Return one choice per lesson ID: `keep`, `drop`, or `uncertain`.
-Return `None` when selection is not configured. Only `drop` removes a lesson
-from this response. It does not delete or retire it.
+```python
+from berry_brain.engine import Brain
+from berry_brain.selection import LessonSelector
 
-The host owns model calls, keys, input limits, timeouts, and spending limits.
-No key or network client is part of this package. Local mode stays offline.
+# evaluator is your configured HTTP client or gateway adapter.
+brain = Brain(path, policy, selector=LessonSelector(evaluator))
+```
+
+This is dependency injection through a typed interface. Transport adapters can
+change without copying the lesson-selection policy. It is a design pattern, not
+a claim that all providers implement one industry-standard evaluation API.
+The built-in `HttpEvaluator` implements the documented
+[TypeSafe contract](https://docs.typesafe.ai/api); Vercel also offers a
+[compatible endpoint](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe).
+Adapters for other contracts must verify their requested and returned model
+identities, usage, and response status before returning answers. They own bounded
+network operations and credential handling; they must not silently switch models.
+Berry's private adapter uses its LLM Gateway and the same `LessonSelector`.
+
+Selection receives `query`, `current_context`, a historical `saved_checkpoint`,
+and allowed active lessons with their IDs, text, and conditions. Only `drop`
+removes a lesson from this response. It does not delete or retire it. The engine
+still validates the returned IDs and choices at its boundary.
+
+The HTTP adapter has no provider-specific defaults. Credentials stay outside
+source and are supplied by private file or environment reference. Local mode
+without selection configuration stays offline. See [setup](usage.md#optional-model-selection).
 
 The engine calls the selector outside its database transaction. Before returning,
 it checks the current checkpoint and candidate versions again. If state changed,

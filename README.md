@@ -16,7 +16,7 @@ to the project. Each new installation starts empty.
 | Resume a task | A saved goal, progress, and next step |
 | Switch AI clients | Shared project memory across connected clients |
 | Reuse a checked method | Lessons with conditions and links to past results |
-| Keep context relevant | Keyword search, with an optional host-provided relevance check |
+| Keep context relevant | Keyword search, with an optional model relevance check |
 
 ## How it works
 
@@ -47,9 +47,10 @@ replace instructions.
 A keyword match can find a lesson that no longer fits. For example, a lesson about
 waiting for a running job is not useful when current facts say the job is complete.
 
-The latest engine supports an **optional lesson selector**. Berry's hosted service
-uses Jev through its shared model Gateway to ask whether each matched lesson fits
-the task and current facts.
+The **same optional lesson selector** works with local storage and server setups.
+It asks an evaluation model, such as Jev, whether each matched lesson fits the task
+and current facts. You choose the provider endpoint, model, and private credential
+reference. No Berry server is required.
 
 | Jev's choice | What the agent receives |
 | --- | --- |
@@ -62,13 +63,16 @@ available. If saved state changes during the check, the brain uses fresh normal
 recall. Jev cannot grant access, promote a lesson, or find lessons that keyword
 search missed. The agent still needs to check current facts.
 
-**Local setup stays offline.** This repository provides the memory engine and the
-selector hook. It does not include Berry's private host, Gateway, or Jev connection.
-Installing it does not enable Jev or require a model key. A host developer can
-connect a selector using the [integration guide](docs/development.md#optional-lesson-selection).
+**Configure once, use one selection path.** The built-in HTTP adapter supports the
+TypeSafe-compatible evaluation API, including TypeSafe and Vercel AI Gateway.
+Other APIs connect through the same small evaluator interface. Berry's own setup
+uses its LLM Gateway adapter; provider keys stay in that Gateway.
 
-When a host enables Jev, the selected lesson texts and conditions, query, supplied
-current context, and saved checkpoint are sent to TypeSafe. Model selection adds
+Follow [model setup](docs/usage.md#optional-model-selection) to enable selection.
+Without model configuration, local Brain makes no network requests.
+
+When selection is enabled, matched lesson texts and conditions, the query, supplied
+current context, and saved checkpoint go to your configured evaluator. This adds
 a network call and model usage. It does not guarantee better answers, lower cost,
 or faster tasks.
 
@@ -95,7 +99,8 @@ Reopen the client sessions. Ask an agent to recall a task, then save a checked
 result. Both clients use the same local database.
 
 Setup adds the brain tools and a short reminder to the client's global
-instructions. It does not need a separate brain account, model key, or server.
+instructions. Basic memory needs no separate brain account, model key, or server.
+Optional model selection uses your own provider configuration.
 
 Keep `.venv` at this path. After an update, run the install and setup commands
 again. Saved data stays outside the source directory.
@@ -108,7 +113,8 @@ again. Saved data stays outside the source directory.
 | [Learning and skills](docs/learning.md) | Recall, evidence, lesson tests, and skill updates |
 | [Development](docs/development.md) | Source files, tests, host access, and upgrades |
 
-Local mode makes no network requests. The AI client can send recalled text to its
-model provider. Keep private data and credentials out of Git.
+Local mode makes no network requests unless you configure model selection.
+The AI client can send recalled text to its model provider. Keep private data and
+credentials out of Git.
 
 Released under the [MIT license](LICENSE).

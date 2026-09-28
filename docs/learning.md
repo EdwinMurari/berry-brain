@@ -81,7 +81,8 @@ a minimum reuse rule. They are not proof that a lesson helps every task.
 
 ## Recall limits
 
-Recall uses keyword search. A host can add optional lesson selection.
+Recall uses keyword search. Local and server setups can add the same optional
+lesson selector through a configured evaluation provider.
 Supply known current facts in the recall `context` field when useful. Saved
 checkpoints remain historical. Selection does not change learning or access rules.
 Its whole response fits within 24 KB.

@@ -132,6 +132,7 @@ def main():
     parser.add_argument("--remote-adapter")
     parser.add_argument("--data-dir", type=Path)
     parser.add_argument("--project", action="append")
+    parser.add_argument("--selection-config", type=Path)
     args = parser.parse_args()
     # Catch broken instruction files before changing an existing registration.
     instructions = instruction_target(global_instructions(args.client), follow_import=args.client == "claude")
@@ -145,8 +146,10 @@ def main():
                    "--local", "--identity", args.client, "--data-dir", str(directory)]
         for project in args.project or ["default"]:
             adapter += ["--project", project]
+        if args.selection_config:
+            adapter += ["--selection-config", str(args.selection_config.expanduser().absolute())]
     else:
-        if args.data_dir or args.project or (args.remote_adapter and not args.ssh_host):
+        if args.data_dir or args.project or args.selection_config or (args.remote_adapter and not args.ssh_host):
             parser.error("local options require --local; --remote-adapter requires --ssh-host")
         config = args.config if args.ssh_host else str(Path(args.config).expanduser().absolute())
         adapter = command(config, args.ssh_host, remote_adapter=args.remote_adapter)

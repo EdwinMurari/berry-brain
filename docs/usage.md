@@ -87,6 +87,71 @@ For another MCP client, register this command as a stdio MCP server:
 Add the same `--project` options if needed. Stdio means the client exchanges
 messages with the brain through the process input and output.
 
+## Optional model selection
+
+Use the same lesson selector locally or in a server application. You choose where
+the evaluation runs. Basic memory works without it.
+
+1. Save your provider API key in a private `model.token` file outside the source
+   directory. On Linux or macOS, give it mode `0600` (`chmod 600 model.token`).
+   On Windows, restrict access to your account through file permissions.
+2. Create `evaluation.json` beside it. This example uses TypeSafe directly:
+
+   ```json
+   {
+     "url": "https://api.typesafe.ai/v1/systemone",
+     "model": "jev-1.13.0",
+     "token_file": "model.token"
+   }
+   ```
+
+3. Pass the config path when registering each client:
+
+   ```sh
+   .venv/bin/berry-brain-configure codex --local --selection-config /absolute/private/evaluation.json
+   .venv/bin/berry-brain-configure claude --local --selection-config /absolute/private/evaluation.json
+   ```
+
+4. Reopen the client sessions. Selection runs when recall finds active lessons.
+   Setup checks the configuration and credential without making a model call.
+
+Keep your existing `--project` and `--data-dir` options when re-registering. Other
+MCP clients can pass `--selection-config` to `berry-brain --local` directly.
+
+The adapter sends `model`, `state`, and typed `questions`. It expects matching
+`answers`, the response `model`, and `usage.input_tokens` / `usage.output_tokens`.
+These providers expose that same HTTP contract:
+
+| Provider | Full endpoint URL | Example model ID |
+| --- | --- | --- |
+| [TypeSafe](https://docs.typesafe.ai/api) | `https://api.typesafe.ai/v1/systemone` | `jev-1.13.0` |
+| [Vercel AI Gateway](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe) | `https://ai-gateway.vercel.sh/typesafe/v1/systemone` | `typesafe-ai/jev` |
+| Compatible service | Your evaluation endpoint | Its exact model ID |
+
+Use the credential for your selected provider. There is no fixed provider allowlist
+or default endpoint. A chat-completion URL is not an evaluation endpoint.
+For a different API, implement the [evaluator interface](development.md#optional-lesson-selection).
+
+`token_file` is relative to the config file unless it is an absolute path.
+Alternatively, set `token_env` to an environment variable name instead of
+`token_file`. The MCP process must inherit that variable; GUI clients might need
+their launch environment configured. Never put a literal key in the JSON or CLI
+arguments. The adapter reloads the referenced key for each request.
+
+The returned model must match `model`. If your provider resolves an alias to a
+different ID, set `response_model` to that exact expected ID. No alternate model
+is selected automatically. Invalid replies, network failures, and timeouts leave
+normal recall available with `selection.status` set to `unavailable`. An uncertain
+answer keeps the lesson. Dropping it only affects that response.
+
+Each request is bounded to 24 KB, waits at most five seconds for network operations,
+and has no retries or redirects. The response is bounded to 1 MiB. HTTPS is required
+except for loopback development endpoints.
+
+To disable selection, repeat your local setup command without `--selection-config`
+and reopen the client. Saved memory remains intact. For `--config` server clients,
+selection is configured by the server; it is not applied again by each client.
+
 ## Data location
 
 | System | Default database path |
@@ -109,8 +174,12 @@ owns login checks and deployment settings.
 
 ## Privacy
 
-Local mode makes no network requests and sends no telemetry. Recalled text goes
-to the AI client. The client can send it to its model provider under its data policy.
+Local mode makes no network requests unless you enable model selection. There is
+no telemetry. Selection sends the query, supplied current context, historical
+checkpoint, and matched lesson texts and conditions to the configured evaluator.
+It does not send the whole database or task history. Your provider's data policy
+applies. Recalled text also goes to the AI client, which can send it to its own
+model provider under its data policy.
 
 The package does not encrypt records. Use disk encryption and account permissions.
 

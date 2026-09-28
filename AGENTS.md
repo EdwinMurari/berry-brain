@@ -3,7 +3,9 @@
 This project owns the shared brain engine, local storage adapter, stdio MCP client,
 and client setup. Keep one implementation of each learning rule.
 
-- Keep hosting, login services, model calls, and deployment settings in the host application.
+- Keep one lesson selector behind the typed evaluator interface. Local setup and
+  host applications use that same selector; adapters own model transport.
+- Keep hosting, login services, credentials, and deployment settings outside the engine.
 - Do not add defaults for a specific home lab.
 - Grant access through explicit policy. Client names grant no special access.
 - Preserve saved data and evidence rules when changing package versions.

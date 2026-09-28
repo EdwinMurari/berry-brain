@@ -28,6 +28,16 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def read_token_file(path: Path) -> str:
+    mode = path.lstat()
+    if not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077):
+        raise ValueError("brain token must be a private regular file")
+    token = path.read_text().strip()
+    if not token or not all(33 <= ord(char) <= 126 for char in token):
+        raise ValueError("brain token must contain printable ASCII without spaces")
+    return token
+
+
 class Client:
     def __init__(self, config):
         if not isinstance(config, dict) or any(not isinstance(config.get(key), str) or not config[key]
@@ -43,12 +53,7 @@ class Client:
         if not all(33 <= ord(char) <= 126 for char in self.identity):
             raise ValueError("brain identity must contain printable ASCII without spaces")
         token_file = Path(config["token_file"]).expanduser()
-        mode = token_file.lstat()
-        if not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077):
-            raise ValueError("brain token must be a private regular file")
-        self.token = token_file.read_text().strip()
-        if not self.token or not all(33 <= ord(char) <= 126 for char in self.token):
-            raise ValueError("brain token must contain printable ASCII without spaces")
+        self.token = read_token_file(token_file)
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def request(self, path, data=None):
@@ -115,14 +120,16 @@ def main():
     parser.add_argument("--data-dir", type=Path, help="local data directory; defaults to the user's application data")
     parser.add_argument("--identity", default="local", help="local client name for attribution")
     parser.add_argument("--project", action="append", help="allowed local project; repeat for more projects")
+    parser.add_argument("--selection-config", type=Path, help="optional local evaluation config")
     parser.add_argument("--call", choices=["tools", "recall", "record", "propose", "trial", "feedback", "checkpoint", "history", "revise"])
     args = parser.parse_args()
     if args.local:
         from .local import LocalClient, default_directory
-        client = LocalClient(args.data_dir or default_directory(), args.identity, args.project or ["default"])
+        client = LocalClient(args.data_dir or default_directory(), args.identity, args.project or ["default"],
+                             selection_config=args.selection_config)
     else:
-        if args.data_dir or args.project or args.identity != "local":
-            parser.error("--data-dir, --identity and --project require --local")
+        if args.data_dir or args.project or args.identity != "local" or args.selection_config:
+            parser.error("--data-dir, --identity, --project and --selection-config require --local")
         client = Client(json.loads(args.config.expanduser().read_text()))
     if args.call:
         print(json.dumps(client.request(args.call, None if args.call == "tools" else json.load(sys.stdin)), ensure_ascii=False))
