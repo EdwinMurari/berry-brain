@@ -48,6 +48,14 @@ Use the Python build tool:
 .venv/bin/python -m build
 ```
 
+## Edit the product diagram
+
+Open [how-it-works.excalidraw](images/how-it-works.excalidraw) in Excalidraw.
+Save the edited scene and export it as `docs/images/how-it-works.svg` with a light
+background. Keep both files together in the same commit. The README embeds the
+SVG and links to the editable scene. Check the image at the README's display size
+so labels fit inside their boxes and remain readable.
+
 ## Connect a host application
 
 Import `Brain` from `berry_brain.engine`. Supply a database path and an explicit
