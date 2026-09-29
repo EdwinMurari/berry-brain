@@ -164,7 +164,7 @@ Use `LessonSelector(evaluator)` for both local and hosted selection. The selecto
 owns the questions, input bounds, and answer validation. An evaluator implements
 the typed `Evaluator` protocol: `evaluate(state, questions)` returns a map of typed
 Choice answers, or `None` when explicitly disabled. It raises on failure. Each
-answer has `type: "choice"` and `choice: "keep" | "drop" | "uncertain"`.
+answer has `type: "choice"` and a `choice` from that question's `criteria`.
 
 ```python
 from berry_brain.engine import Brain
@@ -186,9 +186,18 @@ network operations and credential handling; they must not silently switch models
 Berry's private adapter uses its LLM Gateway and the same `LessonSelector`.
 
 Selection receives `query`, `current_context`, a historical `saved_checkpoint`,
-and allowed active lessons with their IDs, text, and conditions. Only `drop`
-removes a lesson from this response. It does not delete or retire it. The engine
-still validates the returned IDs and choices at its boundary.
+and allowed active and up to three candidate lessons with their IDs, text, and
+conditions. Only `drop` removes an active lesson from this response. Only `keep`
+shows a candidate, and at most one appears. Neither choice deletes, retires, or
+promotes a lesson. The engine still validates the returned IDs and choices at its
+boundary.
+
+`LessonSelector.suggest_feedback(experience, lessons)` reads a saved experience and
+the lessons shown for its task. It returns `helpful`, `harmful`, `neutral`,
+`not_used`, or `unclear` for each one. The engine calls it after the record
+transaction. The first three become `suggested_outcome` in `feedback_due`. The engine
+never stores advice as feedback. Failure reports `feedback_advice.status` as
+`unavailable` and keeps the due list.
 
 The HTTP adapter has no provider-specific defaults. Credentials stay outside
 source and are supplied by private file or environment reference. Local mode
@@ -201,4 +210,5 @@ returns invalid IDs or choices. The response reports `unavailable` or
 `state_changed` when that happens. Receipts cover only returned lessons.
 
 An empty query or no matching lessons makes no selection call. Responses still
-fit within 24 KB. Selection cannot find lessons missed by keyword search.
+fit within 24 KB. Requests to the evaluator are bounded to 60 KB with at most 30 KB
+of state, inside the documented [Jev limits](https://docs.typesafe.ai/models). Selection cannot find lessons missed by keyword search.

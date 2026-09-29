@@ -112,7 +112,8 @@ the evaluation runs. Basic memory works without it.
    .venv/bin/berry-brain-configure claude --local --selection-config /absolute/private/evaluation.json
    ```
 
-4. Reopen the client sessions. Selection runs when recall finds active lessons.
+4. Reopen the client sessions. Selection runs when recall finds matching lessons.
+   It can also suggest feedback after you save an experience.
    Setup checks the configuration and credential without making a model call.
 
 Keep your existing `--project` and `--data-dir` options when re-registering. Other
@@ -142,9 +143,11 @@ The returned model must match `model`. If your provider resolves an alias to a
 different ID, set `response_model` to that exact expected ID. No alternate model
 is selected automatically. Invalid replies, network failures, and timeouts leave
 normal recall available with `selection.status` set to `unavailable`. An uncertain
-answer keeps the lesson. Dropping it only affects that response.
+answer keeps an active lesson. Dropping it only affects that response. A candidate
+needs keep. If feedback advice fails, the saved experience is unchanged and
+`feedback_advice.status` is `unavailable`.
 
-Each request is bounded to 24 KB, waits at most five seconds for network operations,
+Each request is bounded to 60 KB, with at most 30 KB of state, waits at most five seconds for network operations,
 and has no retries or redirects. The response is bounded to 1 MiB. HTTPS is required
 except for loopback development endpoints.
 
@@ -177,6 +180,8 @@ owns login checks and deployment settings.
 Local mode makes no network requests unless you enable model selection. There is
 no telemetry. Selection sends the query, supplied current context, historical
 checkpoint, and matched lesson texts and conditions to the configured evaluator.
+After you save an experience, it sends that experience and the lessons shown for
+its task.
 It does not send the whole database or task history. Your provider's data policy
 applies. Recalled text also goes to the AI client, which can send it to its own
 model provider under its data policy.

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from berry_brain.evaluation_http import configured_selector, MAX_RESPONSE_BYTES
 from berry_brain.local import LocalClient
-from berry_brain.selection import LessonSelector
+from berry_brain.selection import LessonSelector, MAX_STATE_BYTES
 
 
 LESSONS = [{"id": "waiting", "lesson": "Wait for a running job", "conditions": "Job is still running"}]
@@ -46,6 +46,27 @@ class SelectorTests(unittest.TestCase):
             with self.subTest(reply=reply), self.assertRaises(ValueError):
                 select(STATE, LESSONS)
 
+    def test_feedback_advice_reads_the_experience_and_drops_large_excerpts(self):
+        seen = []
+        class Evaluator:
+            def evaluate(self, state, questions):
+                seen.append((state, questions))
+                return {key: {"type": "choice", "choice": reply} for key in questions}
+        advise = LessonSelector(Evaluator())
+        evidence = [{"reference": "artifact:run", "excerpt": "job completed", "source": "tool"}]
+        experience = {"problem": "p", "action": "waited", "result": "done", "outcome": "success", "evidence": evidence}
+        reply = "not_used"
+        self.assertEqual(advise.suggest_feedback(experience, LESSONS), {"waiting": "not_used"})
+        self.assertEqual(seen[0][0], {"experience": experience, "memories": LESSONS})
+        self.assertEqual(set(seen[0][1]["waiting"]["criteria"]),
+                         {"helpful", "harmful", "neutral", "not_used", "unclear"})
+        large = {**experience, "evidence": [{**evidence[0], "excerpt": "x" * 4000}] * 8}
+        advise.suggest_feedback(large, LESSONS)
+        self.assertEqual(seen[1][0]["experience"]["evidence"][0], {"reference": "artifact:run", "source": "tool"})
+        reply = "keep"
+        with self.assertRaises(ValueError):
+            advise.suggest_feedback(experience, LESSONS)
+
     def test_empty_or_oversized_input_never_calls_provider(self):
         class Evaluator:
             def evaluate(self, *args):
@@ -53,7 +74,7 @@ class SelectorTests(unittest.TestCase):
         select = LessonSelector(Evaluator())
         self.assertEqual(select(STATE, []), {})
         with self.assertRaises(ValueError):
-            select({**STATE, "current_context": "x" * 24001}, LESSONS)
+            select({**STATE, "current_context": "x" * (MAX_STATE_BYTES + 1)}, LESSONS)
 
 
 class HttpEvaluationTests(unittest.TestCase):

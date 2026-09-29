@@ -41,8 +41,8 @@ the checkpoint.
 
 ## Test a lesson
 
-A candidate is a proposed lesson. It stays out of normal recall until it passes
-the reuse rule.
+A candidate is a proposed lesson. It is not returned as an active lesson until it
+passes the reuse rule.
 
 ![Saved experiences support proposed lessons. Agents test candidates on fresh tasks. Two helpful tasks with distinct evidence activate a lesson; harmful feedback retires it. Active lessons can return in later recall.](images/learning-flow.svg)
 
@@ -50,10 +50,17 @@ the reuse rule.
 [Editable Excalidraw source](images/learning-flow.excalidraw)
 
 1. Propose a lesson from saved results. State when it applies.
-2. Use `history` to find a candidate for a new task.
-3. Use `trial` to read the candidate for that test.
-4. Run the test and keep a stable link to its fixed result.
+2. Get the candidate for a new task. With model selection, recall can offer it
+   under `candidates` when the model judges that it fits. Without selection, use
+   `history` to find it and `trial` to read it.
+3. Use it only if its conditions hold. Keep a stable link to the fixed result.
+4. Save the result with `record`. The response lists lessons shown for this task
+   under `feedback_due`, with their receipts. A complete checkpoint lists them too.
 5. Use `feedback` to report a helpful, neutral, or harmful result.
+
+With model selection, `feedback_due` can include a `suggested_outcome`. It is
+model advice from the saved experience. Check it against the result. Your report
+can differ. Items with no suggestion still need your own judgment.
 
 Saving an experience alone does not complete a test. The tasks and evidence used
 to create the lesson do not count toward its two helpful tests.
@@ -82,7 +89,9 @@ lesson selector through a configured evaluation provider.
 Supply known current facts in the recall `context` field when useful. Saved
 checkpoints remain historical. Selection does not change learning or access rules.
 Its whole response fits within 24 KB.
-This includes task state, up to 12 lessons, and receipt data for feedback.
+This includes task state, up to 12 lessons, at most one untested candidate, and
+receipt data for feedback. A candidate appears only when the model chose keep; the
+tasks that created a lesson never receive it as a candidate.
 An empty query loads task state only.
 
 Other tasks appear as short previews. A current checkpoint that is too large also

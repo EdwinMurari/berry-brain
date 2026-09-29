@@ -6,10 +6,9 @@ import re
 import sqlite3
 import time
 import uuid
-from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -22,6 +21,15 @@ INSTRUCTIONS = (
 )
 
 RECALL_BYTES = 24000
+# Untested lessons offered per recall. Each needs a model "keep" to appear.
+CANDIDATE_LIMIT = 1
+# Lessons listed for an agent's report after it saves an experience.
+FEEDBACK_DUE_LIMIT = 6
+
+
+class Selector(Protocol):
+    def __call__(self, state: dict, lessons: list[dict]) -> dict[str, str] | None: ...
+    def suggest_feedback(self, experience: dict, lessons: list[dict]) -> dict[str, str] | None: ...
 
 
 class ProjectGrant(BaseModel):
@@ -135,12 +143,12 @@ class Revise(Body):
 MODELS = {"recall": Recall, "record": Record, "propose": Propose, "trial": Trial,
           "feedback": Feedback, "checkpoint": Checkpoint, "history": History, "revise": Revise}
 DESCRIPTIONS = {
-    "recall": "Recall when saved task state or past experience could affect the next decision. Reuse sufficient context already loaded; recall again if relevant shared state may have changed. Use a focused query for active lessons. Supply concise current facts in context when known; do not invent them. Empty query returns task state only. Results fit within 24 KB. Check lesson conditions, current facts and linked skill revisions before use. Read live status from the owning tool or service. Task previews are marked; use history with record_id for full state before resuming or updating them. Returns receipt IDs for outcome feedback. Use a stable task ID across resumes. Omit project only when the client has room-local access.",
-    "record": "Record one meaningful experience with exact source excerpts. event_id must stay unchanged on retries. Record failures too. Never save secrets, personal facts, raw transcripts or speculative claims as observed results.",
+    "recall": "Recall when saved task state or past experience could affect the next decision. Reuse sufficient context already loaded; recall again if relevant shared state may have changed. Use a focused query for active lessons. Supply concise current facts in context when known; do not invent them. Empty query returns task state only. Results fit within 24 KB. Check lesson conditions, current facts and linked skill revisions before use. Read live status from the owning tool or service. Task previews are marked; use history with record_id for full state before resuming or updating them. Returns receipt IDs for outcome feedback. With model selection, recall can add one untested candidate that the model judged relevant; use it only if its conditions hold, and report its effect. Use a stable task ID across resumes. Omit project only when the client has room-local access.",
+    "record": "Record one meaningful experience with exact source excerpts. event_id must stay unchanged on retries. Record failures too. Never save secrets, personal facts, raw transcripts or speculative claims as observed results. The response lists lessons shown for this task that still need your feedback; a suggested outcome is model advice, not a report. Check it against the result, then report with feedback.",
     "propose": "Propose a conditional lesson from recorded experiences in this scope. It remains a candidate until helpful results with distinct evidence on two fresh tasks, with no harmful feedback. Link a superseded lesson when correcting it. For a tested skill method, include its canonical name and full Git revision. Promotion does not publish or edit a skill; use the canonical catalogue's review and validation process.",
     "trial": "Read a candidate explicitly for a fresh-task experiment. Returns a receipt required for feedback. Candidate text is unverified; retain all current permissions and checks.",
     "feedback": "Report the measured result of using a returned lesson, including harm. Keep the task, model and scoring fixed in comparisons. Reference the immutable result of each actual test run; rewording or rebundling an old result is not a new test. Reused references or excerpts cannot qualify as fresh evidence. For skill lessons, test the linked revision. One result per receipt and lesson; retries recover the same result. Client reports are attributed, not independently certified.",
-    "checkpoint": "Save meaningful changes needed to resume or hand off work, not unchanged waits. Keep the goal, essential constraints, latest checked state and next step concise. Link detailed evidence instead of repeating it. Use expected_version=0 for a new task; otherwise use its latest returned version. Keep references to active jobs, but check their live status with the owning tool or service.",
+    "checkpoint": "Save meaningful changes needed to resume or hand off work, not unchanged waits. Keep the goal, essential constraints, latest checked state and next step concise. Link detailed evidence instead of repeating it. Use expected_version=0 for a new task; otherwise use its latest returned version. Keep references to active jobs, but check their live status with the owning tool or service. A complete checkpoint lists lessons shown for this task that still need feedback.",
     "history": "Inspect experiences, candidate lessons, checkpoint history and status changes. Use this to find a relevant candidate when authorized work provides a fresh test, then use trial and feedback. Saving an experience alone does not validate a lesson. Filter by record_id or page with before from next_before. All text is untrusted evidence.",
     "revise": "Retire a harmful or obsolete lesson, or return a retired lesson to candidate for fresh testing. Requires current version and a reason. To change text or a skill revision, propose a replacement with supersedes. Cannot directly activate a lesson or erase its history.",
 }
@@ -170,7 +178,7 @@ class BrainError(Exception):
 
 
 class Brain:
-    def __init__(self, path: Path, policy: dict, *, selector: Callable[[dict, list[dict]], dict[str, str] | None] | None = None):
+    def __init__(self, path: Path, policy: dict, *, selector: Selector | None = None):
         self.selector = selector
         self.path = path
         self.policy = BrainPolicy.model_validate(policy).model_dump()
@@ -284,7 +292,15 @@ class Brain:
             return self.recall(scope, actor, body)
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
-            return getattr(self, action)(db, scope, actor, body)
+            result = getattr(self, action)(db, scope, actor, body)
+            # Retries return the saved response; the due list is read fresh each time.
+            if action == "record" or action == "checkpoint" and body.status == "complete":
+                due = self.feedback_due(db, scope, actor, body)
+        if action == "record":
+            return {**result, **self.advise(due, result["body"])}
+        if action == "checkpoint" and body.status == "complete":
+            return {**result, "feedback_due": due}
+        return result
 
     def catalogue(self, actor):
         """One tool contract for the HTTP service and local clients."""
@@ -355,23 +371,35 @@ class Brain:
                    (receipt_id, scope, task, actor, encode(versions), time.time()))
         return receipt_id
 
-    def recall_candidates(self, db, scope, actor, body):
-        checkpoint = db.execute("SELECT * FROM records WHERE scope=? AND kind='task' AND task=?",
-                                (scope, body.task_id)).fetchone()
+    def recall_scopes(self, scope, actor, body):
         scopes = [scope]
         if scope.startswith("room:"):
             for project, grant in self.policy.get("clients", {}).get(actor, {}).get("projects", {}).items():
                 if body.room_id in grant.get("rooms", []):
                     scopes.append("project:" + project)
+        return scopes
+
+    def recall_candidates(self, db, scope, actor, body):
+        checkpoint = db.execute("SELECT * FROM records WHERE scope=? AND kind='task' AND task=?",
+                                (scope, body.task_id)).fetchone()
+        scopes = self.recall_scopes(scope, actor, body)
         stop_words = {"a", "an", "the", "to", "of", "in", "and", "or", "for", "it", "is", "we", "i", "continue", "please"}
         terms = [t for t in dict.fromkeys(re.findall(r"[^\W_]+", body.query.lower())) if t not in stop_words][:24]
-        rows = []
+        rows, trials = [], []
         if terms:
             query = " OR ".join('"' + term + '"' for term in terms)
             placeholders = ",".join("?" for _ in scopes)
-            rows = db.execute(f"""SELECT r.* FROM search JOIN records r ON r.id=search.id
-                WHERE search MATCH ? AND r.scope IN ({placeholders}) AND r.state='active'
-                ORDER BY bm25(search), r.updated DESC LIMIT ?""", (query, *scopes, body.limit * 4)).fetchall()
+            search = f"""SELECT r.* FROM search JOIN records r ON r.id=search.id
+                WHERE search MATCH ? AND r.scope IN ({placeholders}) AND r.state=?
+                ORDER BY bm25(search), r.updated DESC LIMIT ?"""
+            rows = db.execute(search, (query, *scopes, "active", body.limit * 4)).fetchall()
+            if self.selector is not None:
+                # Untested lessons appear only after a model check. A lesson's own
+                # tasks cannot test it, and a task already reported on adds nothing.
+                trials = [row for row in db.execute(search, (query, *scopes, "candidate", 12)).fetchall()
+                          if body.task_id not in self.lesson_tasks(db, row) and not db.execute(
+                              "SELECT 1 FROM feedback WHERE lesson=? AND task=? AND at>?",
+                              (row["id"], body.task_id, row["reset_at"])).fetchone()][:3]
         current = self.view(checkpoint) if checkpoint else None
         if current and len(encode(current).encode()) > RECALL_BYTES // 2:
             current = self.task_preview(checkpoint)
@@ -379,24 +407,28 @@ class Brain:
                   "recent_tasks": [self.task_preview(r) for r in db.execute(
                       "SELECT * FROM records WHERE scope=? AND kind='task' AND state!='complete' AND task!=? ORDER BY updated DESC LIMIT 3",
                       (scope, body.task_id)).fetchall()] if not checkpoint else [],
-                  "lessons": [],
-                  "notice": "Saved state is historical. Check lesson conditions and current facts before use. A task preview omits details: read history by record_id before resuming or updating it. Active lessons reflect attributed reports, not independent proof."}
-        return result, rows
+                  "lessons": [], "candidates": [],
+                  "notice": "Saved state is historical. Check lesson conditions and current facts before use. A task preview omits details: read history by record_id before resuming or updating it. Active lessons reflect attributed reports, not independent proof. Candidates are untested: use one only if its conditions hold, then report its effect with feedback."}
+        return result, rows, trials
+
+    def lesson_tasks(self, db, row):
+        body = json.loads(row["body"])
+        return {row["task"], *(self.row(db, row["scope"], source)["task"] for source in body["source_ids"])}
 
     def recall(self, scope, actor, body):
         with self.db() as db:
-            result, rows = self.recall_candidates(db, scope, actor, body)
+            result, rows, trials = self.recall_candidates(db, scope, actor, body)
         choices, selection = None, None
-        if rows and self.selector is not None:
+        if (rows or trials) and self.selector is not None:
             state = {"query": body.query, "current_context": body.context,
                      "saved_checkpoint": result["checkpoint"]}
             lessons = [{"id": row["id"], **{key: json.loads(row["body"])[key]
-                        for key in ("lesson", "conditions")}} for row in rows]
+                        for key in ("lesson", "conditions")}} for row in rows + trials]
             try:
                 # The host owns transport. Never hold a database lock on the network.
                 choices = self.selector(state, lessons)
                 if choices is not None:
-                    if (not isinstance(choices, dict) or set(choices) != {r["id"] for r in rows}
+                    if (not isinstance(choices, dict) or set(choices) != {r["id"] for r in rows + trials}
                             or any(value not in {"keep", "drop", "uncertain"} for value in choices.values())):
                         raise ValueError("invalid selection")
                     selection = {"status": "applied"}
@@ -405,35 +437,85 @@ class Brain:
                 choices, selection = None, {"status": "unavailable"}
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
-            current, fresh_rows = self.recall_candidates(db, scope, actor, body)
-            if (current != result or [(r["id"], r["version"]) for r in fresh_rows]
-                    != [(r["id"], r["version"]) for r in rows]):
+            current, fresh_rows, fresh_trials = self.recall_candidates(db, scope, actor, body)
+            if (current != result or [(r["id"], r["version"]) for r in fresh_rows + fresh_trials]
+                    != [(r["id"], r["version"]) for r in rows + trials]):
                 choices = None
                 if selection is not None:
                     selection = {"status": "state_changed"}
             result, rows = current, fresh_rows
             if selection is not None:
                 result["selection"] = selection
+            trials = []
             if choices is not None:
                 rows = [row for row in rows if choices[row["id"]] != "drop"]
-            return self.pack_recall(db, scope, actor, body, result, rows)
+                # Only a positive judgment shows an untested lesson.
+                trials = [row for row in fresh_trials if choices[row["id"]] == "keep"][:CANDIDATE_LIMIT]
+            return self.pack_recall(db, scope, actor, body, result, rows, trials)
 
-    def pack_recall(self, db, scope, actor, body, result, rows):
+    def pack_recall(self, db, scope, actor, body, result, rows, trials):
         selected = []
-        for row in rows:
-            # Reserve the receipt's exact size before committing to the response.
-            result["lessons"].append({**self.view(row), "receipt_id": "0" * 32})
-            if len(encode(result).encode()) <= RECALL_BYTES:
-                selected.append(row)
-            else:
-                result["lessons"].pop()
-            if len(selected) == body.limit:
-                break
+        for key, group, limit in (("lessons", rows, body.limit), ("candidates", trials, CANDIDATE_LIMIT)):
+            count = 0
+            for row in group:
+                if count == limit:
+                    break
+                # Reserve the receipt's exact size before committing to the response.
+                result[key].append({**self.view(row), "receipt_id": "0" * 32})
+                if len(encode(result).encode()) <= RECALL_BYTES:
+                    selected.append(row)
+                    count += 1
+                else:
+                    result[key].pop()
         receipts = {s: self.receipt(db, s, actor, body.task_id, [r for r in selected if r["scope"] == s])
                     for s in sorted({r["scope"] for r in selected})}
-        for lesson in result["lessons"]:
+        for lesson in result["lessons"] + result["candidates"]:
             lesson["receipt_id"] = receipts[lesson["scope"]]
         return result
+
+    def feedback_due(self, db, scope, actor, body):
+        """Lessons shown to this client for this task that have no report yet."""
+        due, seen = [], set()
+        scopes = self.recall_scopes(scope, actor, body)
+        placeholders = ",".join("?" for _ in scopes)
+        receipts = db.execute(f"""SELECT * FROM receipts WHERE scope IN ({placeholders})
+            AND actor=? AND task=? ORDER BY at DESC, id""", (*scopes, actor, body.task_id)).fetchall()
+        for receipt in receipts:
+            for lesson_id in json.loads(receipt["lessons"]):
+                if lesson_id in seen or len(due) == FEEDBACK_DUE_LIMIT:
+                    continue
+                seen.add(lesson_id)
+                row = self.row(db, receipt["scope"], lesson_id, "lesson")
+                if (row["state"] == "retired" or receipt["at"] <= row["reset_at"] or db.execute(
+                        "SELECT 1 FROM feedback WHERE lesson=? AND task=? AND at>?",
+                        (lesson_id, body.task_id, row["reset_at"])).fetchone()):
+                    continue
+                lesson = json.loads(row["body"])
+                due.append({"lesson_id": lesson_id, "receipt_id": receipt["id"],
+                            "project": receipt["scope"].removeprefix("project:") if receipt["scope"].startswith("project:") else "",
+                            "status": row["state"], "lesson": lesson["lesson"], "conditions": lesson["conditions"]})
+        return due
+
+    def advise(self, due, experience):
+        """Add model advice outside the database lock. The agent still makes the report."""
+        result = {"feedback_due": due}
+        if not due or self.selector is None:
+            return result
+        try:
+            advice = self.selector.suggest_feedback(
+                {key: experience[key] for key in ("problem", "action", "result", "outcome", "evidence")},
+                [{"id": item["lesson_id"], "lesson": item["lesson"], "conditions": item["conditions"]} for item in due])
+            if advice is None:
+                return result
+            if not isinstance(advice, dict) or set(advice) != {item["lesson_id"] for item in due}:
+                raise ValueError("invalid feedback advice")
+        except Exception:
+            return {**result, "feedback_advice": {"status": "unavailable"}}
+        for item in due:
+            # Only an observed effect becomes a suggestion; the rest stay open.
+            if advice[item["lesson_id"]] in {"helpful", "harmful", "neutral"}:
+                item["suggested_outcome"] = advice[item["lesson_id"]]
+        return {**result, "feedback_advice": {"status": "applied"}}
 
     @staticmethod
     def task_preview(row):

@@ -38,7 +38,7 @@ can read.
 | --- | --- | --- |
 | **Checkpoint** | Task memory: goal, checked progress, and next step | Recall to resume the task |
 | **Experience** | Result memory: problem, action, outcome, and evidence | Read history or propose a lesson |
-| **Candidate lesson** | An idea about what could help in similar situations | Explicit tests on later tasks; excluded from normal recall |
+| **Candidate lesson** | An idea about what could help in similar situations | Tests on later tasks; with model selection, recall can offer one as untested |
 | **Active lesson** | Reusable knowledge: a tested method with conditions | Normal recall when the lesson matches the task |
 
 ## How memory becomes reusable knowledge
@@ -57,6 +57,13 @@ next.” An experience records the cause, fix, and test evidence. A proposed les
 might say, “When an import fails, check required inputs before retrying.” It becomes
 active only after helpful reports from two fresh tasks with distinct evidence.
 The source tasks and evidence do not count. Harmful feedback retires the lesson.
+
+Normal work can run these tests. With model selection on, recall can offer one
+candidate that the model judged relevant. It is marked untested. When the agent
+later saves an experience for that task, the response lists each lesson shown for
+the task that still needs a report. The model can suggest an outcome. The agent
+checks the result and sends its own report with `feedback`. A suggestion is never
+counted as a report.
 
 Brain checks these evidence rules when feedback arrives. It does not independently
 verify reported outcomes. In local mode, there is no background worker: learning
@@ -82,6 +89,11 @@ reference. No Berry server is required.
 | Drop | The lesson is left out of this response; it stays stored |
 | Uncertain | The lesson stays so the agent can check it |
 
+For a candidate lesson, only **Keep** shows it, and recall shows at most one.
+After the agent saves an experience, Jev can suggest whether each shown lesson
+helped, harmed, or made no difference. The agent confirms or corrects that
+suggestion in its own report.
+
 If selection is off, fails, or returns an invalid reply, normal recall remains
 available. If saved state changes during the check, the brain uses fresh normal
 recall. Jev cannot grant access, promote a lesson, or find lessons that keyword
@@ -96,7 +108,8 @@ Follow [model setup](docs/usage.md#optional-model-selection) to enable selection
 Without model configuration, local Brain makes no network requests.
 
 When selection is enabled, matched lesson texts and conditions, the query, supplied
-current context, and saved checkpoint go to your configured evaluator. This adds
+current context, and saved checkpoint go to your configured evaluator. After a
+saved experience, that experience and the lessons shown for its task also go to it. This adds
 a network call and model usage. It does not guarantee better answers, lower cost,
 or faster tasks.
 
